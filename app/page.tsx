@@ -167,6 +167,47 @@ export default function Home() {
 
   const appointmentInterval = businessSettings?.appointment_interval ?? 45;
 
+  const barberName = businessSettings?.barber_name?.trim() || "Murathan Yazar";
+  const phone = businessSettings?.phone?.trim() || "+90 533 128 86 39";
+  const phoneHref = `tel:${phone.replace(/[^+\d]/g, "")}`;
+  const instagram = businessSettings?.instagram?.trim() || "@murathanyazar";
+  const instagramHandle = instagram.replace(/^@/, "");
+  const instagramHref = `https://www.instagram.com/${instagramHandle}/`;
+  const address = businessSettings?.address?.trim() || "";
+  const mapEmbedUrl = address
+    ? `https://www.google.com/maps?q=${encodeURIComponent(address)}&output=embed`
+    : "";
+  const mapOpenUrl = address
+    ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`
+    : "";
+
+  const workingHoursText = useMemo(() => {
+    const openDays = workingHours.filter((day) => day.is_open);
+
+    if (openDays.length === 0) return "Kapalı";
+
+    const hourRanges = new Set(
+      openDays.map(
+        (day) => `${day.open_time.slice(0, 5)}–${day.close_time.slice(0, 5)}`
+      )
+    );
+
+    if (hourRanges.size === 1) {
+      const firstDay = openDays[0]?.day_name || "";
+      const lastDay = openDays[openDays.length - 1]?.day_name || "";
+      const dayText =
+        openDays.length === 1
+          ? firstDay
+          : openDays.length === 7
+          ? "Her gün"
+          : `${firstDay}–${lastDay}`;
+
+      return `${dayText} • ${Array.from(hourRanges)[0]}`;
+    }
+
+    return `${openDays.length} gün açık • Saatler güne göre değişiyor`;
+  }, [workingHours]);
+
   useEffect(() => {
     const loadServices = async () => {
       setServicesLoading(true);
@@ -530,15 +571,15 @@ export default function Home() {
 
           <div className="mt-8 flex flex-wrap justify-center gap-4 text-xs text-white/60">
             <a
-              href="tel:+905331288639"
+              href={phoneHref}
               className="transition hover:text-[#c9a35b]"
             >
-              +90 533 128 86 39
+              {phone}
             </a>
 
             <span>•</span>
 
-            <span>@murathanyazar</span>
+            <span>{instagram}</span>
           </div>
         </div>
       </main>
@@ -562,7 +603,7 @@ export default function Home() {
           <div className="mx-auto flex max-w-6xl items-center justify-between px-5 py-4">
             <button onClick={goHome} className="text-left">
               <p className="font-bold tracking-wider">
-                MURATHAN YAZAR
+                {barberName.toUpperCase()}
               </p>
 
               <p className="text-[10px] tracking-[0.35em] text-[#c9a35b]">
@@ -1410,7 +1451,7 @@ export default function Home() {
         <div className="mx-auto flex max-w-6xl items-center justify-between px-5 py-4">
           <button onClick={goHome} className="text-left">
             <p className="font-bold tracking-wider">
-              MURATHAN YAZAR
+              {barberName.toUpperCase()}
             </p>
 
             <p className="text-[10px] tracking-[0.35em] text-[#c9a35b]">
@@ -1490,7 +1531,7 @@ export default function Home() {
               <span className="h-2 w-2 rounded-full bg-[#c9a35b]" />
 
               <span className="text-xs font-semibold tracking-[0.25em] text-[#c9a35b]">
-                MURATHAN YAZAR
+                {barberName.toUpperCase()}
               </span>
             </div>
 
@@ -1542,10 +1583,10 @@ export default function Home() {
                 </p>
 
                 <a
-                  href="tel:+905331288639"
+                  href={phoneHref}
                   className="mt-2 block text-sm transition hover:text-[#c9a35b]"
                 >
-                  +90 533 128 86 39
+                  {phone}
                 </a>
               </div>
 
@@ -1555,7 +1596,7 @@ export default function Home() {
                 </p>
 
                 <p className="mt-2 text-sm">
-                  @murathanyazar
+                  {instagram}
                 </p>
               </div>
             </div>
@@ -1729,10 +1770,10 @@ export default function Home() {
                     </p>
 
                     <a
-                      href="tel:+905331288639"
+                      href={phoneHref}
                       className="mt-1 block font-semibold transition hover:text-[#c9a35b]"
                     >
-                      +90 533 128 86 39
+                      {phone}
                     </a>
                   </div>
                 </div>
@@ -1747,9 +1788,14 @@ export default function Home() {
                       INSTAGRAM
                     </p>
 
-                    <p className="mt-1 font-semibold">
-                      @murathanyazar
-                    </p>
+                    <a
+                      href={instagramHref}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="mt-1 block font-semibold transition hover:text-[#c9a35b]"
+                    >
+                      {instagram}
+                    </a>
                   </div>
                 </div>
 
@@ -1763,8 +1809,8 @@ export default function Home() {
                       ADRES
                     </p>
 
-                    <p className="mt-1 font-semibold text-white/50">
-                      Daha sonra eklenecek
+                    <p className="mt-1 font-semibold text-white/70">
+                      {scheduleLoading ? "Yükleniyor..." : address || "Adres henüz eklenmedi"}
                     </p>
                   </div>
                 </div>
@@ -1779,36 +1825,65 @@ export default function Home() {
                       ÇALIŞMA SAATLERİ
                     </p>
 
-                    <p className="mt-1 font-semibold text-white/50">
-                      Daha sonra eklenecek
+                    <p className="mt-1 font-semibold text-white/70">
+                      {scheduleLoading ? "Yükleniyor..." : workingHoursText}
                     </p>
                   </div>
                 </div>
               </div>
             </div>
 
-            <div className="flex min-h-[450px] items-center justify-center rounded-[32px] border border-white/10 bg-[#0e0e0e] p-8">
-              <div className="max-w-sm text-center">
-                <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full border border-[#c9a35b]/20 bg-[#c9a35b]/5 text-2xl text-[#c9a35b]">
-                  ◉
+            <div className="min-h-[450px] overflow-hidden rounded-[32px] border border-white/10 bg-[#0e0e0e]">
+              {address ? (
+                <div className="flex h-full min-h-[450px] flex-col">
+                  <iframe
+                    title="Berber konumu"
+                    src={mapEmbedUrl}
+                    className="min-h-[350px] w-full flex-1 border-0"
+                    loading="lazy"
+                    referrerPolicy="no-referrer-when-downgrade"
+                  />
+
+                  <div className="flex flex-col gap-3 border-t border-white/10 p-5 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <p className="text-xs tracking-[0.2em] text-[#c9a35b]">KONUM</p>
+                      <p className="mt-1 text-sm text-white/65">{address}</p>
+                    </div>
+
+                    <a
+                      href={mapOpenUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="shrink-0 rounded-xl bg-[#c9a35b] px-5 py-3 text-center text-sm font-bold text-black transition hover:bg-[#dfbd76]"
+                    >
+                      Haritada Aç
+                    </a>
+                  </div>
                 </div>
+              ) : (
+                <div className="flex min-h-[450px] items-center justify-center p-8">
+                  <div className="max-w-sm text-center">
+                    <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full border border-[#c9a35b]/20 bg-[#c9a35b]/5 text-2xl text-[#c9a35b]">
+                      ◉
+                    </div>
 
-                <p className="mt-6 text-xl font-semibold">
-                  Konum
-                </p>
+                    <p className="mt-6 text-xl font-semibold">Konum</p>
 
-                <p className="mt-3 text-sm leading-6 text-white/35">
-                  Adres bilgisi eklendiğinde burada harita
-                  görüntülenecek.
-                </p>
+                    <p className="mt-3 text-sm leading-6 text-white/35">
+                      {scheduleLoading
+                        ? "Adres bilgisi yükleniyor..."
+                        : "Admin panelinden adres eklendiğinde harita burada otomatik görüntülenecek."}
+                    </p>
 
-                <button
-                  onClick={goAppointment}
-                  className="mt-8 rounded-xl bg-[#c9a35b] px-7 py-4 font-bold text-black transition hover:bg-[#dfbd76]"
-                >
-                  Randevu Al
-                </button>
-              </div>
+                    <button
+                      onClick={goAppointment}
+                      className="mt-8 rounded-xl bg-[#c9a35b] px-7 py-4 font-bold text-black transition hover:bg-[#dfbd76]"
+                    >
+                      Randevu Al
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -1819,7 +1894,7 @@ export default function Home() {
         <div className="mx-auto flex max-w-6xl flex-col justify-between gap-8 px-5 py-10 md:flex-row md:items-center">
           <div>
             <p className="font-bold tracking-wider">
-              MURATHAN YAZAR
+              {barberName.toUpperCase()}
             </p>
 
             <p className="mt-1 text-[10px] tracking-[0.35em] text-[#c9a35b]">
