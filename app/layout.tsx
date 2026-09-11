@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "BERBER",
+  title: "Murathan Yazar | Berber",
   description:
     "Murathan Yazar Berber - Online randevu oluşturun, hizmetleri ve çalışma saatlerini görüntüleyin.",
 };
