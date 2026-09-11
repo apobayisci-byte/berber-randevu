@@ -1832,40 +1832,6 @@ export default function Home() {
           </p>
         </div>
       </footer>
-
-      {/* MOBİL SABİT RANDEVU */}
-      <div className="fixed bottom-4 left-4 right-4 z-50 md:hidden">
-        <button
-          onClick={goAppointment}
-          className="flex w-full items-center justify-center gap-3 rounded-xl bg-[#c9a35b] py-4 font-bold text-black shadow-2xl"
-        >
-          <span className="flex items-center justify-center gap-3">
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              xmlns="http://www.w3.org/2000/svg"
-              className="h-5 w-5"
-              aria-hidden="true"
-            >
-              <path
-                d="M7 3V6M17 3V6M4.5 9H19.5M6 5H18C19.1046 5 20 5.89543 20 7V19C20 20.1046 19.1046 21 18 21H6C4.89543 21 4 20.1046 4 19V7C4 5.89543 4.89543 5 6 5Z"
-                stroke="currentColor"
-                strokeWidth="1.8"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-              <path
-                d="M9 15L11 17L15.5 12.5"
-                stroke="currentColor"
-                strokeWidth="1.8"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-            <span>Randevu Al</span>
-          </span>
-        </button>
-      </div>
     </main>
   );
 }
