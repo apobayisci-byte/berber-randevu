@@ -64,6 +64,7 @@ function getDayOfWeek(date: string) {
 async function sendPushNotifications(
   supabaseAdmin: SupabaseClient<any, "public", any>,
   appointment: {
+    customerName: string;
     date: string;
     time: string;
     serviceName: string;
@@ -97,7 +98,7 @@ async function sendPushNotifications(
 
   const payload = JSON.stringify({
     title: "Yeni randevu 🔔",
-    body: `${appointment.date} • ${appointment.time} • ${appointment.serviceName}`,
+    body: `${appointment.customerName} • ${appointment.time} • ${appointment.serviceName}`,
     url: "/admin",
     tag: `appointment-${appointment.date}-${appointment.time}`,
   });
@@ -552,6 +553,7 @@ export async function POST(request: Request) {
     await sendPushNotifications(
       supabaseAdmin,
       {
+        customerName,
         date: appointmentDate,
         time: appointmentTime,
         serviceName: service.name,
