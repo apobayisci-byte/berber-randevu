@@ -54,6 +54,7 @@ type ActivityLog = {
 
 type Tab =
   | "appointments"
+  | "statistics"
   | "history"
   | "logs"
   | "services"
@@ -70,6 +71,7 @@ export default function AdminPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [activeTab, setActiveTab] = useState<Tab>("appointments");
+  const [weekOffset, setWeekOffset] = useState(0);
 
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [activityLogs, setActivityLogs] = useState<ActivityLog[]>([]);
@@ -858,6 +860,35 @@ export default function AdminPage() {
       )
   ).length;
 
+  const calendarMonday = new Date(monday);
+  calendarMonday.setDate(calendarMonday.getDate() + weekOffset * 7);
+
+  const calendarDays = Array.from({ length: 7 }, (_, index) => {
+    const date = new Date(calendarMonday);
+    date.setDate(calendarMonday.getDate() + index);
+
+    const key = localDateKey(date);
+    const dayAppointments = activeAppointments
+      .filter((appointment) => appointment.appointment_date === key)
+      .sort((a, b) => a.appointment_time.localeCompare(b.appointment_time));
+
+    return {
+      date,
+      key,
+      appointments: dayAppointments,
+    };
+  });
+
+  const calendarSunday = calendarDays[6].date;
+  const calendarRangeLabel = `${calendarMonday.toLocaleDateString("tr-TR", {
+    day: "2-digit",
+    month: "short",
+  })} – ${calendarSunday.toLocaleDateString("tr-TR", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  })}`;
+
   return (
     <main className="min-h-screen bg-[#080808] text-white">
       {newAppointmentNotice && (
@@ -913,10 +944,10 @@ export default function AdminPage() {
       )}
 
       <header className="border-b border-white/10 bg-[#0d0d0d]">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-5 py-5">
+        <div className="mx-auto flex max-w-7xl items-center justify-between gap-2 px-4 py-3 sm:px-5 sm:py-5">
           <div>
-            <p className="font-bold">MURATHAN YAZAR</p>
-            <p className="text-[10px] tracking-[0.3em] text-[#c9a35b]">
+            <p className="text-sm font-bold leading-tight sm:text-base">MURATHAN YAZAR</p>
+            <p className="mt-1 text-[8px] tracking-[0.22em] text-[#c9a35b] sm:text-[10px] sm:tracking-[0.3em]">
               YÖNETİM PANELİ
             </p>
           </div>
@@ -925,7 +956,7 @@ export default function AdminPage() {
             <button
               onClick={enablePushNotifications}
               disabled={pushLoading || pushEnabled}
-              className={`rounded-xl border px-4 py-2 text-sm font-semibold transition ${
+              className={`rounded-lg border px-2.5 py-2 text-[10px] font-semibold transition sm:rounded-xl sm:px-4 sm:text-sm ${
                 pushEnabled
                   ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
                   : "border-[#c9a35b]/35 bg-[#c9a35b]/5 text-[#c9a35b] hover:bg-[#c9a35b]/10"
@@ -940,7 +971,7 @@ export default function AdminPage() {
 
             <button
               onClick={logout}
-              className="rounded-xl border border-white/10 px-4 py-2 text-sm text-white/60 hover:text-white"
+              className="rounded-lg border border-white/10 px-2.5 py-2 text-[10px] text-white/60 hover:text-white sm:rounded-xl sm:px-4 sm:text-sm"
             >
               Çıkış Yap
             </button>
@@ -948,36 +979,19 @@ export default function AdminPage() {
         </div>
       </header>
 
-      <div className="mx-auto max-w-7xl px-5 py-8">
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <Stat
-            title="Bugünkü Randevu"
-            value={todayAppointments}
-            subtitle="İptal ve reddedilenler hariç"
-          />
-          <Stat
-            title="Bu Haftaki Müşteri"
-            value={weeklyCustomers}
-            subtitle="Tamamlanan randevular"
-          />
-          <Stat
-            title="Bu Haftaki Kazanç"
-            value={`${weeklyRevenue.toLocaleString("tr-TR")} ₺`}
-            subtitle="Randevu günündeki fiyatlarla"
-          />
-          <Stat
-            title="Onay Bekleyen"
-            value={pending}
-            subtitle="Aktif işlem bekleyen randevular"
-          />
-        </div>
-
-        <div className="mt-7 flex gap-2 overflow-x-auto pb-2">
+      <div className="mx-auto max-w-7xl px-4 py-3 sm:px-5 sm:py-6">
+        <div className="grid grid-cols-3 gap-1.5 sm:flex sm:gap-1 sm:overflow-x-auto sm:pb-1.5">
           <TabButton
             active={activeTab === "appointments"}
             onClick={() => setActiveTab("appointments")}
           >
             Aktif Randevular
+          </TabButton>
+          <TabButton
+            active={activeTab === "statistics"}
+            onClick={() => setActiveTab("statistics")}
+          >
+            İstatistikler
           </TabButton>
           <TabButton
             active={activeTab === "history"}
@@ -1018,33 +1032,56 @@ export default function AdminPage() {
         )}
 
         {activeTab === "appointments" && (
-          <section className="mt-6">
-            <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
+          <section className="mt-4 sm:mt-6">
+            <div className="flex flex-col justify-between gap-4 xl:flex-row xl:items-end">
               <div>
-                <p className="text-xs tracking-[0.25em] text-[#c9a35b]">
-                  AKTİF RANDEVULAR
+                <p className="text-[9px] tracking-[0.2em] text-[#c9a35b] sm:text-xs sm:tracking-[0.25em]">
+                  HAFTALIK RANDEVU TAKVİMİ
                 </p>
-                <h1 className="mt-2 text-3xl font-bold">
-                  Randevu Yönetimi
-                </h1>
-                <p className="mt-2 text-sm text-white/40">
-                  Arşivlenen kayıtlar burada görünmez. Kayıtlar hiçbir
-                  zaman silinmez.
+                <h1 className="mt-1.5 text-2xl font-bold sm:mt-2 sm:text-3xl">Randevu Yönetimi</h1>
+                <p className="mt-1.5 text-xs text-white/40 sm:mt-2 sm:text-sm">
+                  Pazartesi–Pazar randevularını tek ekranda görüntüle.
                 </p>
               </div>
 
-              <div className="flex flex-wrap gap-2">
+              <div className="grid grid-cols-3 gap-1.5 sm:flex sm:flex-wrap sm:items-center sm:gap-2">
                 <button
+                  type="button"
+                  onClick={() => setWeekOffset((current) => current - 1)}
+                  className="rounded-lg border border-white/10 bg-[#101010] px-2 py-2 text-[10px] text-white/65 transition hover:text-white sm:rounded-xl sm:px-4 sm:py-3 sm:text-sm"
+                >
+                  ← Önceki
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setWeekOffset(0)}
+                  className="rounded-lg border border-[#c9a35b]/30 bg-[#c9a35b]/5 px-2 py-2 text-[10px] font-semibold text-[#c9a35b] sm:rounded-xl sm:px-4 sm:py-3 sm:text-sm"
+                >
+                  Bu Hafta
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setWeekOffset((current) => current + 1)}
+                  className="rounded-lg border border-white/10 bg-[#101010] px-2 py-2 text-[10px] text-white/65 transition hover:text-white sm:rounded-xl sm:px-4 sm:py-3 sm:text-sm"
+                >
+                  Sonraki →
+                </button>
+
+                <button
+                  type="button"
                   onClick={loadAll}
-                  className="rounded-xl border border-white/10 px-4 py-3 text-sm text-white/60 hover:text-white"
+                  className="rounded-lg border border-white/10 px-2 py-2 text-[10px] text-white/60 hover:text-white sm:rounded-xl sm:px-4 sm:py-3 sm:text-sm"
                 >
                   Yenile
                 </button>
 
                 <button
+                  type="button"
                   onClick={archiveDay}
                   disabled={archiving || archivableCount === 0}
-                  className="rounded-xl border border-[#c9a35b]/35 bg-[#c9a35b]/10 px-4 py-3 text-sm font-bold text-[#c9a35b] transition hover:bg-[#c9a35b]/15 disabled:cursor-not-allowed disabled:opacity-35"
+                  className="col-span-2 rounded-lg border border-[#c9a35b]/35 bg-[#c9a35b]/10 px-2 py-2 text-[10px] font-bold text-[#c9a35b] transition hover:bg-[#c9a35b]/15 disabled:cursor-not-allowed disabled:opacity-35 sm:col-span-1 sm:rounded-xl sm:px-4 sm:py-3 sm:text-sm"
                 >
                   {archiving
                     ? "Arşivleniyor..."
@@ -1053,26 +1090,144 @@ export default function AdminPage() {
               </div>
             </div>
 
-            {loading ? (
-              <p className="mt-8 text-white/40">
-                Randevular yükleniyor...
+            <div className="mt-5 flex items-center justify-between rounded-2xl border border-white/10 bg-[#101010] px-4 py-3">
+              <p className="text-sm font-semibold text-white/75">
+                {calendarRangeLabel}
               </p>
-            ) : activeAppointments.length === 0 ? (
-              <div className="mt-8 rounded-2xl border border-white/10 bg-[#101010] p-8 text-center text-white/35">
-                Aktif randevu bulunmuyor.
-              </div>
+              <p className="text-xs text-white/30">
+                {calendarDays.reduce(
+                  (total, day) => total + day.appointments.length,
+                  0
+                )}{" "}
+                randevu
+              </p>
+            </div>
+
+            {loading ? (
+              <p className="mt-8 text-white/40">Randevular yükleniyor...</p>
             ) : (
-              <div className="mt-7 grid gap-4">
-                {activeAppointments.map((appointment) => (
-                  <AppointmentCard
-                    key={appointment.id}
-                    appointment={appointment}
-                    updatingId={updatingId}
-                    onUpdateStatus={updateStatus}
-                  />
-                ))}
+              <div className="mt-4 overflow-hidden rounded-xl border border-white/10 bg-[#0d0d0d] sm:rounded-2xl">
+                <div className="w-full">
+                  <div className="grid grid-cols-[38px_repeat(7,minmax(0,1fr))] border-b border-white/10 bg-[#111111] sm:grid-cols-[54px_repeat(7,minmax(0,1fr))] lg:grid-cols-[62px_repeat(7,minmax(0,1fr))]">
+                    <div className="flex items-center justify-center border-r border-white/10 px-0.5 py-1.5 text-[6px] font-semibold text-white/30 sm:px-1 sm:py-2 sm:text-[8px] lg:text-[9px]">
+                      SAAT
+                    </div>
+
+                    {calendarDays.map((day) => (
+                      <div
+                        key={day.key}
+                        className={`border-r border-white/10 px-1 py-2 text-center last:border-r-0 ${
+                          day.key === todayKey ? "bg-[#c9a35b]/10" : ""
+                        }`}
+                      >
+                        <p className={`truncate text-[6px] font-bold uppercase tracking-normal sm:text-[8px] sm:tracking-[0.08em] ${
+                          day.key === todayKey ? "text-[#c9a35b]" : "text-white/45"
+                        }`}>
+                          <span className="sm:hidden">
+                            {["Pzr", "Pzt", "Sal", "Çar", "Per", "Cum", "Cmt"][
+                              day.date.getDay()
+                            ]}
+                          </span>
+                          <span className="hidden sm:inline">
+                            {day.date.toLocaleDateString("tr-TR", {
+                              weekday: "long",
+                            })}
+                          </span>
+                        </p>
+                        <p className="mt-0.5 text-[6px] font-bold text-white/70 sm:text-[9px] lg:text-[10px]">
+                          {day.date.toLocaleDateString("tr-TR", {
+                            day: "2-digit",
+                            month: "2-digit",
+                          })}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+
+                  {Array.from({ length: 25 }, (_, index) => {
+                    const totalMinutes = 10 * 60 + index * 30;
+                    const hour = Math.floor(totalMinutes / 60);
+                    const minute = totalMinutes % 60;
+                    const slot = `${String(hour).padStart(2, "0")}:${String(
+                      minute
+                    ).padStart(2, "0")}`;
+
+                    return (
+                      <div
+                        key={slot}
+                        className="grid grid-cols-[38px_repeat(7,minmax(0,1fr))] border-b border-white/[0.07] last:border-b-0 sm:grid-cols-[54px_repeat(7,minmax(0,1fr))] lg:grid-cols-[62px_repeat(7,minmax(0,1fr))]"
+                      >
+                        <div className="flex min-h-[34px] items-center justify-center border-r border-white/10 bg-[#101010] px-0.5 text-[7px] font-bold text-[#c9a35b] sm:min-h-[40px] sm:px-1 sm:text-[9px] lg:min-h-[44px] lg:text-[10px]">
+                          {slot}
+                        </div>
+
+                        {calendarDays.map((day) => {
+                          const appointment = day.appointments.find(
+                            (item) => item.appointment_time.slice(0, 5) === slot
+                          );
+
+                          return (
+                            <div
+                              key={`${day.key}-${slot}`}
+                              className={`min-h-[34px] min-w-0 overflow-hidden border-r border-white/[0.07] px-0.5 py-0.5 last:border-r-0 sm:min-h-[40px] sm:px-1 sm:py-1 lg:min-h-[44px] ${
+                                day.key === todayKey
+                                  ? "bg-[#c9a35b]/[0.025]"
+                                  : ""
+                              }`}
+                            >
+                              {appointment ? (
+                                <TimetableAppointment appointment={appointment} />
+                              ) : (
+                                <div className="flex h-full min-h-[30px] items-center justify-center text-[5px] text-white/10 sm:min-h-[34px] sm:text-[7px] lg:text-[8px]">
+                                  Boş
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             )}
+
+            <p className="mt-2 text-[10px] text-white/25">
+              Takvim 10:00–22:00 arasında 30 dakikalık randevu aralıklarını gösterir.
+            </p>
+          </section>
+        )}
+
+        {activeTab === "statistics" && (
+          <section className="mt-6">
+            <SectionTitle
+              eyebrow="İSTATİSTİKLER"
+              title="İşletme Özeti"
+              description="Günlük ve haftalık randevu performansını buradan takip edebilirsin."
+            />
+
+            <div className="mt-6 grid grid-cols-2 gap-3 xl:grid-cols-4">
+              <Stat
+                title="Bugünkü Randevu"
+                value={todayAppointments}
+                subtitle="İptal ve reddedilenler hariç"
+              />
+              <Stat
+                title="Bu Haftaki Müşteri"
+                value={weeklyCustomers}
+                subtitle="Tamamlanan randevular"
+              />
+              <Stat
+                title="Bu Haftaki Kazanç"
+                value={`${weeklyRevenue.toLocaleString("tr-TR")} ₺`}
+                subtitle="Randevu günündeki fiyatlarla"
+              />
+              <Stat
+                title="Onay Bekleyen"
+                value={pending}
+                subtitle="Aktif işlem bekleyen randevular"
+              />
+            </div>
           </section>
         )}
 
@@ -1199,7 +1354,7 @@ export default function AdminPage() {
               {services.map((service) => (
                 <div
                   key={service.id}
-                  className="rounded-2xl border border-white/10 bg-[#101010] p-5"
+                  className="rounded-xl border border-white/10 bg-[#101010] p-3 sm:rounded-2xl sm:p-5"
                 >
                   <div className="grid gap-4 md:grid-cols-[1.4fr_0.7fr_0.7fr_auto] md:items-end">
                     <Field label="Hizmet Adı">
@@ -1512,6 +1667,26 @@ export default function AdminPage() {
 const inputClass =
   "mt-2 w-full rounded-xl border border-white/10 bg-[#171717] px-4 py-3 text-white outline-none transition focus:border-[#c9a35b]/60 disabled:cursor-not-allowed disabled:opacity-35";
 
+function TimetableAppointment({
+  appointment,
+}: {
+  appointment: Appointment;
+}) {
+  const service = appointment.services?.name ?? "-";
+
+  return (
+    <div className="min-w-0 overflow-hidden rounded-[4px] border border-[#c9a35b]/20 bg-[#c9a35b]/[0.055] px-0.5 py-0.5 sm:rounded-md sm:px-1 lg:px-1.5 lg:py-1">
+      <p className="truncate text-[5px] font-bold leading-[7px] text-white sm:text-[7px] sm:leading-3 lg:text-[8px]">
+        {appointment.customer_name}
+      </p>
+      <p className="truncate text-[4px] leading-[6px] text-emerald-300 sm:text-[6px] sm:leading-3 lg:text-[7px]">
+        {appointment.customer_phone}
+      </p>
+      <p className="truncate text-[4px] leading-[6px] text-white/40 sm:text-[6px] sm:leading-3 lg:text-[7px]">{service}</p>
+    </div>
+  );
+}
+
 function AppointmentCard({
   appointment,
   updatingId,
@@ -1699,12 +1874,12 @@ function Stat({
 }) {
   return (
     <div className="rounded-2xl border border-white/10 bg-[#101010] p-5">
-      <p className="text-xs text-white/35">{title}</p>
-      <p className="mt-2 text-3xl font-bold text-[#c9a35b]">
+      <p className="text-[10px] text-white/35 sm:text-xs">{title}</p>
+      <p className="mt-1.5 text-2xl font-bold text-[#c9a35b] sm:mt-2 sm:text-3xl">
         {value}
       </p>
       {subtitle && (
-        <p className="mt-2 text-[11px] text-white/25">
+        <p className="mt-1.5 text-[8px] leading-3 text-white/25 sm:mt-2 sm:text-[11px]">
           {subtitle}
         </p>
       )}
@@ -1741,7 +1916,7 @@ function TabButton({
   return (
     <button
       onClick={onClick}
-      className={`whitespace-nowrap rounded-xl border px-4 py-3 text-sm font-semibold transition ${
+      className={`min-w-0 truncate whitespace-nowrap rounded-lg border px-1.5 py-2 text-[8px] font-semibold transition sm:px-3 sm:text-xs ${
         active
           ? "border-[#c9a35b]/40 bg-[#c9a35b]/10 text-[#c9a35b]"
           : "border-white/10 bg-[#101010] text-white/45 hover:text-white"
