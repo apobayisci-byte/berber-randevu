@@ -819,8 +819,12 @@ export default function Home() {
         </div>
 
         <div className="relative z-10 w-full max-w-xl text-center">
-          <div className="mx-auto mb-8 flex h-16 w-16 items-center justify-center rounded-full border border-[#c9a35b]/40 bg-black/30 text-2xl text-[#c9a35b] shadow-2xl backdrop-blur-sm">
-            ✂
+          <div className="mx-auto mb-8 flex h-16 w-16 items-center justify-center">
+            <img
+              src="/my-logo.png"
+              alt="Murathan Yazar"
+              className="h-16 w-16 object-contain"
+            />
           </div>
 
           <p className="mb-4 text-xs font-semibold tracking-[0.45em] text-[#c9a35b]">
