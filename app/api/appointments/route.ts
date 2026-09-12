@@ -152,6 +152,7 @@ async function getDayConfiguration(
 ) {
   const dayOfWeek = getDayOfWeek(appointmentDate);
 
+  // Önce normal haftalık çalışma düzenini ve randevu aralığını al.
   const [workingHourResult, settingsResult] = await Promise.all([
     supabaseAdmin
       .from("working_hours")
@@ -166,24 +167,67 @@ async function getDayConfiguration(
   ]);
 
   if (workingHourResult.error || settingsResult.error) {
+    console.error(
+      "Normal çalışma planı okunamadı:",
+      workingHourResult.error,
+      settingsResult.error
+    );
     throw new Error("SCHEDULE");
   }
 
-  const workingHour = workingHourResult.data;
   const appointmentInterval =
     Number(settingsResult.data?.appointment_interval) || 45;
+
+  if (!Number.isInteger(appointmentInterval) || appointmentInterval <= 0) {
+    return null;
+  }
+
+  // Sadece seçilen tarihte özel bir kayıt varsa normal planın üzerine yaz.
+  const { data: specialHour, error: specialHourError } = await supabaseAdmin
+    .from("special_working_hours")
+    .select("work_date, is_open, open_time, close_time")
+    .eq("work_date", appointmentDate)
+    .maybeSingle();
+
+  if (specialHourError) {
+    // Özel plan okunamazsa bütün günleri kapatmak yerine normal haftalık
+    // çalışma düzenine güvenli biçimde geri dön.
+    console.error("Özel çalışma planı okunamadı:", specialHourError);
+  } else if (specialHour) {
+    if (
+      !specialHour.is_open ||
+      !specialHour.open_time ||
+      !specialHour.close_time
+    ) {
+      return null;
+    }
+
+    return {
+      workingHour: {
+        is_open: true,
+        open_time: specialHour.open_time,
+        close_time: specialHour.close_time,
+      },
+      slotAnchorTime:
+        workingHourResult.data?.open_time ?? specialHour.open_time,
+      appointmentInterval,
+    };
+  }
+
+  const workingHour = workingHourResult.data;
 
   if (
     !workingHour ||
     !workingHour.is_open ||
-    !Number.isInteger(appointmentInterval) ||
-    appointmentInterval <= 0
+    !workingHour.open_time ||
+    !workingHour.close_time
   ) {
     return null;
   }
 
   return {
     workingHour,
+    slotAnchorTime: workingHour.open_time,
     appointmentInterval,
   };
 }
@@ -342,9 +386,11 @@ export async function GET(request: Request) {
       return NextResponse.json({ available_times: [] });
     }
 
-    const { workingHour, appointmentInterval } = configuration;
+    const { workingHour, slotAnchorTime, appointmentInterval } =
+      configuration;
     const openMinutes = timeToMinutes(workingHour.open_time);
     const closeMinutes = timeToMinutes(workingHour.close_time);
+    const slotAnchorMinutes = timeToMinutes(slotAnchorTime);
     const existingAppointments = await getExistingAppointments(
       supabaseAdmin,
       appointmentDate,
@@ -356,10 +402,13 @@ export async function GET(request: Request) {
     const availableTimes: string[] = [];
 
     for (
-      let start = openMinutes;
+      let start = slotAnchorMinutes;
       start + totalDuration <= closeMinutes;
       start += appointmentInterval
     ) {
+      if (start < openMinutes) {
+        continue;
+      }
       if (
         appointmentDate < now.date ||
         (appointmentDate === now.date && start <= nowMinutes)
@@ -514,14 +563,16 @@ export async function POST(request: Request) {
       );
     }
 
-    const { workingHour, appointmentInterval } = configuration;
+    const { workingHour, slotAnchorTime, appointmentInterval } =
+      configuration;
     const openMinutes = timeToMinutes(workingHour.open_time);
     const closeMinutes = timeToMinutes(workingHour.close_time);
+    const slotAnchorMinutes = timeToMinutes(slotAnchorTime);
 
     if (
       requestedMinutes < openMinutes ||
       requestedMinutes + totalDuration > closeMinutes ||
-      (requestedMinutes - openMinutes) % appointmentInterval !== 0
+      (requestedMinutes - slotAnchorMinutes) % appointmentInterval !== 0
     ) {
       return NextResponse.json(
         { error: "Seçilen saat bu hizmetler için uygun değil." },

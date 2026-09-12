@@ -52,6 +52,15 @@ type ActivityLog = {
   created_at: string;
 };
 
+type SpecialWorkingHour = {
+  id: number;
+  work_date: string;
+  is_open: boolean;
+  open_time: string | null;
+  close_time: string | null;
+};
+
+
 type Tab =
   | "appointments"
   | "statistics"
@@ -59,6 +68,7 @@ type Tab =
   | "logs"
   | "services"
   | "hours"
+  | "availability"
   | "business";
 
 export default function AdminPage() {
@@ -72,12 +82,19 @@ export default function AdminPage() {
   const [error, setError] = useState("");
   const [activeTab, setActiveTab] = useState<Tab>("appointments");
   const [weekOffset, setWeekOffset] = useState(0);
+  const [selectedAppointment, setSelectedAppointment] =
+    useState<Appointment | null>(null);
 
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [activityLogs, setActivityLogs] = useState<ActivityLog[]>([]);
   const [services, setServices] = useState<Service[]>([]);
   const [workingHours, setWorkingHours] = useState<WorkingHour[]>([]);
   const [business, setBusiness] = useState<BusinessSettings | null>(null);
+  const [specialWorkingHours, setSpecialWorkingHours] = useState<SpecialWorkingHour[]>([]);
+  const [specialDate, setSpecialDate] = useState("");
+  const [specialIsOpen, setSpecialIsOpen] = useState(true);
+  const [specialOpenTime, setSpecialOpenTime] = useState("10:00");
+  const [specialCloseTime, setSpecialCloseTime] = useState("20:00");
 
   const [notice, setNotice] = useState<{
     type: "success" | "error";
@@ -154,7 +171,7 @@ export default function AdminPage() {
   };
 
   const loadSettings = async () => {
-    const [servicesResult, hoursResult, businessResult] = await Promise.all([
+    const [servicesResult, hoursResult, businessResult, specialHoursResult] = await Promise.all([
       supabase
         .from("services")
         .select("id,name,price,duration_minutes,is_active,sort_order")
@@ -168,15 +185,23 @@ export default function AdminPage() {
         .select("id,barber_name,phone,instagram,address,appointment_interval")
         .limit(1)
         .single(),
+      supabase
+        .from("special_working_hours")
+        .select("id,work_date,is_open,open_time,close_time")
+        .order("work_date", { ascending: true }),
     ]);
 
     if (servicesResult.error) throw servicesResult.error;
     if (hoursResult.error) throw hoursResult.error;
     if (businessResult.error) throw businessResult.error;
+    if (specialHoursResult.error) throw specialHoursResult.error;
 
     setServices((servicesResult.data ?? []) as Service[]);
     setWorkingHours((hoursResult.data ?? []) as WorkingHour[]);
     setBusiness(businessResult.data as BusinessSettings);
+    setSpecialWorkingHours(
+      (specialHoursResult.data ?? []) as SpecialWorkingHour[]
+    );
   };
 
   const loadAll = async () => {
@@ -434,6 +459,7 @@ export default function AdminPage() {
     setActivityLogs([]);
     setServices([]);
     setWorkingHours([]);
+    setSpecialWorkingHours([]);
     setBusiness(null);
   };
 
@@ -695,6 +721,70 @@ export default function AdminPage() {
     );
   };
 
+  const saveSpecialWorkingHour = async () => {
+    if (!specialDate) {
+      showNotice("error", "Önce bir tarih seç.");
+      return;
+    }
+
+    if (
+      specialIsOpen &&
+      (!specialOpenTime ||
+        !specialCloseTime ||
+        specialOpenTime >= specialCloseTime)
+    ) {
+      showNotice("error", "Açılış ve kapanış saatlerini kontrol et.");
+      return;
+    }
+
+    setSaving(true);
+
+    const { error } = await supabase
+      .from("special_working_hours")
+      .upsert(
+        {
+          work_date: specialDate,
+          is_open: specialIsOpen,
+          open_time: specialIsOpen ? specialOpenTime : null,
+          close_time: specialIsOpen ? specialCloseTime : null,
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "work_date" }
+      );
+
+    setSaving(false);
+
+    if (error) {
+      console.error(error);
+      showNotice("error", "Özel müsaitlik kaydedilemedi.");
+      return;
+    }
+
+    await loadSettings();
+    showNotice(
+      "success",
+      specialIsOpen
+        ? `${formatDate(specialDate)} için özel çalışma saati kaydedildi.`
+        : `${formatDate(specialDate)} tam gün kapalı olarak kaydedildi.`
+    );
+  };
+
+  const deleteSpecialWorkingHour = async (id: number) => {
+    const { error } = await supabase
+      .from("special_working_hours")
+      .delete()
+      .eq("id", id);
+
+    if (error) {
+      console.error(error);
+      showNotice("error", "Özel müsaitlik kaldırılamadı.");
+      return;
+    }
+
+    await loadSettings();
+    showNotice("success", "Özel müsaitlik kaldırıldı.");
+  };
+
   const saveBusiness = async () => {
     if (!business) return;
 
@@ -832,16 +922,34 @@ export default function AdminPage() {
       !["rejected", "cancelled"].includes(appointment.status)
   ).length;
 
-  const weeklyCompleted = appointments.filter(
-    (appointment) =>
-      appointment.status === "completed" &&
-      appointment.appointment_date >= weekStartKey &&
-      appointment.appointment_date <= weekEndKey
+  const istanbulNow = new Date(
+    new Date().toLocaleString("en-US", { timeZone: "Europe/Istanbul" })
+  );
+  const currentTimeKey = `${String(istanbulNow.getHours()).padStart(
+    2,
+    "0"
+  )}:${String(istanbulNow.getMinutes()).padStart(2, "0")}`;
+
+  const weeklyRealized = appointments.filter(
+    (appointment) => {
+      if (
+        ["cancelled", "rejected"].includes(appointment.status) ||
+        appointment.appointment_date < weekStartKey ||
+        appointment.appointment_date > weekEndKey
+      ) {
+        return false;
+      }
+
+      if (appointment.appointment_date < todayKey) return true;
+      if (appointment.appointment_date > todayKey) return false;
+
+      return appointment.appointment_time.slice(0, 5) <= currentTimeKey;
+    }
   );
 
-  const weeklyCustomers = weeklyCompleted.length;
+  const weeklyCustomers = weeklyRealized.length;
 
-  const weeklyRevenue = weeklyCompleted.reduce(
+  const weeklyRevenue = weeklyRealized.reduce(
     (total, appointment) =>
       total +
       Number(
@@ -868,8 +976,13 @@ export default function AdminPage() {
     date.setDate(calendarMonday.getDate() + index);
 
     const key = localDateKey(date);
-    const dayAppointments = activeAppointments
-      .filter((appointment) => appointment.appointment_date === key)
+    const dayAppointments = appointments
+      .filter(
+        (appointment) =>
+          !appointment.is_archived &&
+          appointment.appointment_date === key &&
+          !["rejected"].includes(appointment.status)
+      )
       .sort((a, b) => a.appointment_time.localeCompare(b.appointment_time));
 
     return {
@@ -891,6 +1004,97 @@ export default function AdminPage() {
 
   return (
     <main className="min-h-screen bg-[#080808] text-white">
+      {selectedAppointment && (
+        <div
+          className="fixed inset-0 z-[150] flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm"
+          onClick={() => setSelectedAppointment(null)}
+        >
+          <div
+            className="w-full max-w-md rounded-2xl border border-white/10 bg-[#111] p-5 shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-[10px] tracking-[0.25em] text-[#c9a35b]">
+                  RANDEVU DETAYI
+                </p>
+                <h2
+                  className={`mt-2 text-xl font-bold ${
+                    selectedAppointment.status === "cancelled"
+                      ? "text-white/35 line-through"
+                      : "text-white"
+                  }`}
+                >
+                  {selectedAppointment.customer_name}
+                </h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedAppointment(null)}
+                className="rounded-lg border border-white/10 px-3 py-2 text-xs text-white/50"
+              >
+                Kapat
+              </button>
+            </div>
+
+            <div className="mt-5 grid grid-cols-2 gap-3 text-sm">
+              <Info label="Telefon" value={selectedAppointment.customer_phone} />
+              <Info
+                label="Hizmet"
+                value={selectedAppointment.services?.name ?? "-"}
+              />
+              <Info
+                label="Tarih"
+                value={formatDate(selectedAppointment.appointment_date)}
+              />
+              <Info
+                label="Saat"
+                value={selectedAppointment.appointment_time.slice(0, 5)}
+              />
+            </div>
+
+            {selectedAppointment.status === "cancelled" ? (
+              <div className="mt-5 rounded-xl border border-red-500/20 bg-red-500/[0.06] px-4 py-3 text-center text-sm font-bold text-red-300">
+                İPTAL EDİLDİ
+              </div>
+            ) : (
+              <div className="mt-5 grid grid-cols-2 gap-2">
+                <a
+                  href={`https://wa.me/${selectedAppointment.customer_phone.replace(
+                    /\D/g,
+                    ""
+                  )}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="rounded-xl border border-emerald-500/25 bg-emerald-500/[0.07] px-4 py-3 text-center text-sm font-semibold text-emerald-300"
+                >
+                  WhatsApp
+                </a>
+                <button
+                  type="button"
+                  disabled={updatingId !== null}
+                  onClick={async () => {
+                    const confirmed = window.confirm(
+                      `${selectedAppointment.customer_name} adlı müşterinin randevusu iptal edilsin mi?`
+                    );
+                    if (!confirmed) return;
+
+                    await updateStatus(selectedAppointment.id, "cancelled");
+                    setSelectedAppointment((current) =>
+                      current ? { ...current, status: "cancelled" } : current
+                    );
+                  }}
+                  className="rounded-xl border border-red-500/25 bg-red-500/[0.07] px-4 py-3 text-sm font-semibold text-red-300 disabled:opacity-40"
+                >
+                  {updatingId === selectedAppointment.id
+                    ? "İptal ediliyor..."
+                    : "İptal Et"}
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
       {newAppointmentNotice && (
         <div className="fixed right-5 top-5 z-[110] w-[calc(100%-2.5rem)] max-w-sm">
           <button
@@ -1016,6 +1220,12 @@ export default function AdminPage() {
             onClick={() => setActiveTab("hours")}
           >
             Çalışma Saatleri
+          </TabButton>
+          <TabButton
+            active={activeTab === "availability"}
+            onClick={() => setActiveTab("availability")}
+          >
+            Özel Müsaitlik
           </TabButton>
           <TabButton
             active={activeTab === "business"}
@@ -1176,7 +1386,10 @@ export default function AdminPage() {
                               }`}
                             >
                               {appointment ? (
-                                <TimetableAppointment appointment={appointment} />
+                                <TimetableAppointment
+                                  appointment={appointment}
+                                  onClick={() => setSelectedAppointment(appointment)}
+                                />
                               ) : (
                                 <div className="flex h-full min-h-[30px] items-center justify-center text-[5px] text-white/10 sm:min-h-[34px] sm:text-[7px] lg:text-[8px]">
                                   Boş
@@ -1215,12 +1428,12 @@ export default function AdminPage() {
               <Stat
                 title="Bu Haftaki Müşteri"
                 value={weeklyCustomers}
-                subtitle="Tamamlanan randevular"
+                subtitle="Gerçekleşen, iptal edilmemiş randevular"
               />
               <Stat
                 title="Bu Haftaki Kazanç"
                 value={`${weeklyRevenue.toLocaleString("tr-TR")} ₺`}
-                subtitle="Randevu günündeki fiyatlarla"
+                subtitle="Gerçekleşen randevuların toplamı"
               />
               <Stat
                 title="Onay Bekleyen"
@@ -1563,6 +1776,137 @@ export default function AdminPage() {
           </section>
         )}
 
+        {activeTab === "availability" && (
+          <section className="mt-6">
+            <SectionTitle
+              eyebrow="ÖZEL MÜSAİTLİK"
+              title="Tarihe Özel Çalışma Planı"
+              description="Normal haftalık çalışma saatlerini sadece seçtiğin tarih için değiştir veya o günü tamamen kapat."
+            />
+
+            <div className="mt-6 grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
+              <div className="rounded-2xl border border-white/10 bg-[#101010] p-5">
+                <Field label="Tarih">
+                  <input
+                    type="date"
+                    value={specialDate}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      setSpecialDate(value);
+
+                      const existing = specialWorkingHours.find(
+                        (item) => item.work_date === value
+                      );
+
+                      if (existing) {
+                        setSpecialIsOpen(existing.is_open);
+                        setSpecialOpenTime(
+                          existing.open_time?.slice(0, 5) ?? "10:00"
+                        );
+                        setSpecialCloseTime(
+                          existing.close_time?.slice(0, 5) ?? "20:00"
+                        );
+                      } else {
+                        setSpecialIsOpen(true);
+                        setSpecialOpenTime("10:00");
+                        setSpecialCloseTime("20:00");
+                      }
+                    }}
+                    className={inputClass}
+                  />
+                </Field>
+
+                <label className="mt-5 flex cursor-pointer items-center gap-3 rounded-xl border border-white/10 bg-[#171717] px-4 py-3 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={specialIsOpen}
+                    onChange={(e) => setSpecialIsOpen(e.target.checked)}
+                    className="h-4 w-4 accent-[#c9a35b]"
+                  />
+                  Bu tarihte çalışılıyor
+                </label>
+
+                {specialIsOpen && (
+                  <div className="mt-4 grid grid-cols-2 gap-3">
+                    <Field label="Başlangıç">
+                      <input
+                        type="time"
+                        value={specialOpenTime}
+                        onChange={(e) => setSpecialOpenTime(e.target.value)}
+                        className={inputClass}
+                      />
+                    </Field>
+
+                    <Field label="Bitiş">
+                      <input
+                        type="time"
+                        value={specialCloseTime}
+                        onChange={(e) => setSpecialCloseTime(e.target.value)}
+                        className={inputClass}
+                      />
+                    </Field>
+                  </div>
+                )}
+
+                <button
+                  type="button"
+                  disabled={saving}
+                  onClick={saveSpecialWorkingHour}
+                  className="mt-5 w-full rounded-xl bg-[#c9a35b] px-5 py-3 font-bold text-black disabled:opacity-40"
+                >
+                  {saving ? "Kaydediliyor..." : "Özel Planı Kaydet"}
+                </button>
+              </div>
+
+              <div className="rounded-2xl border border-white/10 bg-[#101010] p-5">
+                <p className="text-xs font-semibold tracking-[0.18em] text-[#c9a35b]">
+                  KAYITLI ÖZEL GÜNLER
+                </p>
+
+                {specialWorkingHours.length === 0 ? (
+                  <div className="mt-4 rounded-xl border border-dashed border-white/10 p-7 text-center text-sm text-white/30">
+                    Henüz tarihe özel çalışma planı yok.
+                  </div>
+                ) : (
+                  <div className="mt-4 grid gap-2">
+                    {specialWorkingHours.map((item) => (
+                      <div
+                        key={item.id}
+                        className="flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-[#171717] px-4 py-3"
+                      >
+                        <div className="min-w-0">
+                          <p className="font-semibold">
+                            {formatDate(item.work_date)}
+                          </p>
+                          <p
+                            className={`mt-1 text-xs ${
+                              item.is_open
+                                ? "text-emerald-300"
+                                : "text-red-300"
+                            }`}
+                          >
+                            {item.is_open
+                              ? `${item.open_time?.slice(0, 5)} – ${item.close_time?.slice(0, 5)}`
+                              : "Tam gün kapalı"}
+                          </p>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => deleteSpecialWorkingHour(item.id)}
+                          className="shrink-0 rounded-lg border border-red-500/20 bg-red-500/[0.05] px-3 py-2 text-xs font-semibold text-red-300"
+                        >
+                          Kaldır
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </section>
+        )}
+
         {activeTab === "business" && business && (
           <section className="mt-6">
             <SectionTitle
@@ -1669,21 +2013,51 @@ const inputClass =
 
 function TimetableAppointment({
   appointment,
+  onClick,
 }: {
   appointment: Appointment;
+  onClick: () => void;
 }) {
   const service = appointment.services?.name ?? "-";
+  const cancelled = appointment.status === "cancelled";
 
   return (
-    <div className="min-w-0 overflow-hidden rounded-[4px] border border-[#c9a35b]/20 bg-[#c9a35b]/[0.055] px-0.5 py-0.5 sm:rounded-md sm:px-1 lg:px-1.5 lg:py-1">
-      <p className="truncate text-[5px] font-bold leading-[7px] text-white sm:text-[7px] sm:leading-3 lg:text-[8px]">
+    <button
+      type="button"
+      onClick={onClick}
+      className={`block w-full min-w-0 overflow-hidden rounded-[4px] border px-0.5 py-0.5 text-left sm:rounded-md sm:px-1 lg:px-1.5 lg:py-1 ${
+        cancelled
+          ? "border-red-500/15 bg-red-500/[0.035] opacity-55"
+          : "border-[#c9a35b]/20 bg-[#c9a35b]/[0.055]"
+      }`}
+    >
+      {cancelled && (
+        <p className="truncate text-[4px] font-black leading-[6px] text-red-300 sm:text-[6px] sm:leading-3 lg:text-[7px]">
+          İPTAL
+        </p>
+      )}
+      <p
+        className={`truncate text-[5px] font-bold leading-[7px] sm:text-[7px] sm:leading-3 lg:text-[8px] ${
+          cancelled ? "text-white/40 line-through" : "text-white"
+        }`}
+      >
         {appointment.customer_name}
       </p>
-      <p className="truncate text-[4px] leading-[6px] text-emerald-300 sm:text-[6px] sm:leading-3 lg:text-[7px]">
+      <p
+        className={`truncate text-[4px] leading-[6px] sm:text-[6px] sm:leading-3 lg:text-[7px] ${
+          cancelled ? "text-white/25 line-through" : "text-emerald-300"
+        }`}
+      >
         {appointment.customer_phone}
       </p>
-      <p className="truncate text-[4px] leading-[6px] text-white/40 sm:text-[6px] sm:leading-3 lg:text-[7px]">{service}</p>
-    </div>
+      <p
+        className={`truncate text-[4px] leading-[6px] sm:text-[6px] sm:leading-3 lg:text-[7px] ${
+          cancelled ? "text-white/20 line-through" : "text-white/40"
+        }`}
+      >
+        {service}
+      </p>
+    </button>
   );
 }
 

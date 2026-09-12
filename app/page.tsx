@@ -378,7 +378,7 @@ export default function Home() {
     };
 
     loadSchedule();
-  }, []);
+  }, [view]);
 
   useEffect(() => {
     const loadAvailableTimes = async () => {
