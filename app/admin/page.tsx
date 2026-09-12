@@ -90,6 +90,12 @@ export default function AdminPage() {
   const [selectedAppointment, setSelectedAppointment] =
     useState<Appointment | null>(null);
 
+  const [manualSlot, setManualSlot] = useState<{ date: string; time: string } | null>(null);
+  const [manualName, setManualName] = useState("");
+  const [manualPhone, setManualPhone] = useState("");
+  const [manualServiceId, setManualServiceId] = useState<number | null>(null);
+  const [manualSaving, setManualSaving] = useState(false);
+
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [activityLogs, setActivityLogs] = useState<ActivityLog[]>([]);
   const [services, setServices] = useState<Service[]>([]);
@@ -580,6 +586,146 @@ export default function AdminPage() {
     setUpdatingId(null);
   };
 
+  const openManualAppointment = (date: string, time: string) => {
+    setManualSlot({ date, time });
+    setManualName("");
+    setManualPhone("");
+    setManualServiceId(null);
+  };
+
+  const saveManualAppointment = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!manualSlot || manualSaving) return;
+
+    const name = manualName.trim();
+    const phone = manualPhone.trim();
+    const selectedService = services.find(
+      (service) => service.id === manualServiceId && service.is_active
+    );
+
+    if (name.length < 2) {
+      showNotice("error", "Müşteri adını gir.");
+      return;
+    }
+
+    if (phone && phone.replace(/\\D/g, "").length < 10) {
+      showNotice("error", "Telefon gireceksen geçerli bir numara gir.");
+      return;
+    }
+
+    if (!selectedService) {
+      showNotice("error", "Bir hizmet seç.");
+      return;
+    }
+
+    setManualSaving(true);
+
+    try {
+      const { data, error: insertError } = await supabase
+        .from("appointments")
+        .insert({
+          service_id: selectedService.id,
+          customer_name: name,
+          customer_phone: phone,
+          customer_note: "Admin panelinden manuel eklendi.",
+          appointment_date: manualSlot.date,
+          appointment_time: manualSlot.time,
+          status: "approved",
+          price_at_booking: selectedService.price ?? 0,
+          total_price: selectedService.price ?? 0,
+          total_duration_minutes: selectedService.duration_minutes,
+          is_archived: false,
+        })
+        .select("id")
+        .single();
+
+      if (insertError || !data) throw insertError ?? new Error("Randevu oluşturulamadı.");
+
+      const { error: serviceSnapshotError } = await supabase
+        .from("appointment_services")
+        .insert({
+          appointment_id: data.id,
+          service_id: selectedService.id,
+          service_name: selectedService.name,
+          price_at_booking: selectedService.price ?? 0,
+          duration_minutes: selectedService.duration_minutes,
+        });
+
+      if (serviceSnapshotError) {
+        console.error("Manuel randevu hizmet kaydı eklenemedi:", serviceSnapshotError);
+        await supabase
+          .from("appointments")
+          .delete()
+          .eq("id", data.id)
+          .eq("customer_note", "Admin panelinden manuel eklendi.");
+        throw serviceSnapshotError;
+      }
+
+      try {
+        await addActivityLog(
+          data.id,
+          "appointment_created_manually",
+          `${name} adlı müşteri ${formatDate(manualSlot.date)} ${manualSlot.time} saatine admin panelinden manuel eklendi.`
+        );
+      } catch (logError) {
+        console.error("Manuel randevu işlem logu kaydedilemedi:", logError);
+      }
+
+      await Promise.all([loadAppointments(), loadActivityLogs()]);
+      showNotice("success", `${name} ${manualSlot.time} saatine eklendi.`);
+      setManualSlot(null);
+      setManualName("");
+      setManualPhone("");
+      setManualServiceId(null);
+    } catch (err) {
+      console.error("Manuel randevu eklenemedi:", err);
+      showNotice("error", "Müşteri eklenemedi. Saat dolu olabilir.");
+    } finally {
+      setManualSaving(false);
+    }
+  };
+
+  const deleteManualAppointment = async (appointment: Appointment) => {
+    if (updatingId !== null) return;
+
+    const confirmed = window.confirm(
+      `${appointment.customer_name} adlı manuel randevu tamamen silinsin mi?`
+    );
+    if (!confirmed) return;
+
+    setUpdatingId(appointment.id);
+
+    const { error: deleteError } = await supabase
+      .from("appointments")
+      .delete()
+      .eq("id", appointment.id)
+      .eq("customer_note", "Admin panelinden manuel eklendi.");
+
+    if (deleteError) {
+      console.error("Manuel randevu silinemedi:", deleteError);
+      showNotice("error", "Manuel randevu silinemedi.");
+      setUpdatingId(null);
+      return;
+    }
+
+    try {
+      await addActivityLog(
+        null,
+        "appointment_deleted_manually",
+        `${appointment.customer_name} adlı müşterinin ${formatDate(
+          appointment.appointment_date
+        )} ${appointment.appointment_time.slice(0, 5)} manuel randevusu silindi.`
+      );
+    } catch (logError) {
+      console.error("Silme işlem logu kaydedilemedi:", logError);
+    }
+
+    setSelectedAppointment(null);
+    await Promise.all([loadAppointments(), loadActivityLogs()]);
+    showNotice("success", "Manuel randevu silindi.");
+    setUpdatingId(null);
+  };
+
   const archiveDay = async () => {
     if (archiving) return;
 
@@ -978,16 +1124,21 @@ export default function AdminPage() {
       )
   ).length;
 
-  // Takvim haftanın Pazartesi gününe sabitlenmez.
-  // Her zaman bugün + önümüzdeki 6 günü gösterir.
-  // İleri/geri kontrolleri 7 günlük bloklar halinde çalışmaya devam eder.
-  const calendarStart = new Date(today);
-  calendarStart.setHours(0, 0, 0, 0);
-  calendarStart.setDate(calendarStart.getDate() + weekOffset * 7);
+  // Takvim her zaman Pazartesi–Cumartesi sırasını gösterir.
+  // Pazar admin takviminde yer almaz; ileri/geri kontrolleri gerçek hafta bazında çalışır.
+  const calendarMonday = new Date(today);
+  const calendarDayNumber = calendarMonday.getDay();
+  const calendarDiffToMonday =
+    calendarDayNumber === 0 ? -6 : 1 - calendarDayNumber;
 
-  const calendarDays = Array.from({ length: 7 }, (_, index) => {
-    const date = new Date(calendarStart);
-    date.setDate(calendarStart.getDate() + index);
+  calendarMonday.setDate(
+    calendarMonday.getDate() + calendarDiffToMonday + weekOffset * 7
+  );
+  calendarMonday.setHours(0, 0, 0, 0);
+
+  const calendarDays = Array.from({ length: 6 }, (_, index) => {
+    const date = new Date(calendarMonday);
+    date.setDate(calendarMonday.getDate() + index);
 
     const key = localDateKey(date);
     const dayAppointments = appointments
@@ -1006,7 +1157,8 @@ export default function AdminPage() {
     };
   });
 
-  const calendarEnd = calendarDays[6].date;
+  const calendarStart = calendarDays[0].date;
+  const calendarEnd = calendarDays[calendarDays.length - 1].date;
   const calendarRangeLabel = `${calendarStart.toLocaleDateString("tr-TR", {
     day: "2-digit",
     month: "short",
@@ -1018,6 +1170,85 @@ export default function AdminPage() {
 
   return (
     <main className="min-h-screen bg-[#080808] text-white">
+      {manualSlot && (
+        <div
+          className="fixed inset-0 z-[160] flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm"
+          onClick={() => !manualSaving && setManualSlot(null)}
+        >
+          <form
+            onSubmit={saveManualAppointment}
+            className="w-full max-w-md rounded-2xl border border-white/10 bg-[#111] p-5 shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-[10px] tracking-[0.25em] text-[#c9a35b]">MANUEL RANDEVU</p>
+                <h2 className="mt-2 text-xl font-bold">Müşteri Ekle</h2>
+                <p className="mt-1 text-xs text-white/40">
+                  {formatDate(manualSlot.date)} • {manualSlot.time}
+                </p>
+              </div>
+              <button
+                type="button"
+                disabled={manualSaving}
+                onClick={() => setManualSlot(null)}
+                className="rounded-lg border border-white/10 px-3 py-2 text-xs text-white/50 disabled:opacity-40"
+              >
+                Kapat
+              </button>
+            </div>
+
+            <label className="mt-6 block text-xs text-white/40">AD SOYAD</label>
+            <input
+              autoFocus
+              required
+              value={manualName}
+              onChange={(event) => setManualName(event.target.value)}
+              placeholder="Müşteri adı soyadı"
+              className="mt-2 w-full rounded-xl border border-white/10 bg-[#171717] px-4 py-3 text-sm outline-none focus:border-[#c9a35b]/60"
+            />
+
+            <label className="mt-4 block text-xs text-white/40">
+              TELEFON <span className="text-white/20">(OPSİYONEL)</span>
+            </label>
+            <input
+              type="tel"
+              value={manualPhone}
+              onChange={(event) => setManualPhone(event.target.value)}
+              placeholder="05xx xxx xx xx"
+              className="mt-2 w-full rounded-xl border border-white/10 bg-[#171717] px-4 py-3 text-sm outline-none focus:border-[#c9a35b]/60"
+            />
+
+            <label className="mt-4 block text-xs text-white/40">HİZMET</label>
+            <select
+              required
+              value={manualServiceId ?? ""}
+              onChange={(event) =>
+                setManualServiceId(event.target.value ? Number(event.target.value) : null)
+              }
+              className="mt-2 w-full rounded-xl border border-white/10 bg-[#171717] px-4 py-3 text-sm text-white outline-none focus:border-[#c9a35b]/60"
+            >
+              <option value="">Hizmet seç</option>
+              {services.filter((service) => service.is_active).map((service) => (
+                <option key={service.id} value={service.id}>
+                  {service.name}
+                  {service.price !== null ? ` • ${Number(service.price).toLocaleString("tr-TR")} ₺` : ""}
+                  {` • ${service.duration_minutes} dk`}
+                </option>
+              ))}
+            </select>
+
+            <button
+              type="submit"
+              disabled={manualSaving}
+              className="mt-6 w-full rounded-xl bg-[#c9a35b] py-3.5 text-sm font-bold text-black transition hover:bg-[#dfbd76] disabled:opacity-50"
+            >
+              {manualSaving ? "Ekleniyor..." : "Randevuyu Ekle"}
+            </button>
+          </form>
+        </div>
+      )}
+
       {selectedAppointment && (
         <div
           className="fixed inset-0 z-[150] flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm"
@@ -1072,39 +1303,53 @@ export default function AdminPage() {
                 İPTAL EDİLDİ
               </div>
             ) : (
-              <div className="mt-5 grid grid-cols-2 gap-2">
-                <a
-                  href={`https://wa.me/${selectedAppointment.customer_phone.replace(
-                    /\D/g,
-                    ""
-                  )}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="rounded-xl border border-emerald-500/25 bg-emerald-500/[0.07] px-4 py-3 text-center text-sm font-semibold text-emerald-300"
-                >
-                  WhatsApp
-                </a>
+              selectedAppointment.customer_note ===
+              "Admin panelinden manuel eklendi." ? (
                 <button
                   type="button"
                   disabled={updatingId !== null}
-                  onClick={async () => {
-                    const confirmed = window.confirm(
-                      `${selectedAppointment.customer_name} adlı müşterinin randevusu iptal edilsin mi?`
-                    );
-                    if (!confirmed) return;
-
-                    await updateStatus(selectedAppointment.id, "cancelled");
-                    setSelectedAppointment((current) =>
-                      current ? { ...current, status: "cancelled" } : current
-                    );
-                  }}
-                  className="rounded-xl border border-red-500/25 bg-red-500/[0.07] px-4 py-3 text-sm font-semibold text-red-300 disabled:opacity-40"
+                  onClick={() => deleteManualAppointment(selectedAppointment)}
+                  className="mt-5 w-full rounded-xl border border-red-500/25 bg-red-500/[0.07] px-4 py-3 text-sm font-semibold text-red-300 disabled:opacity-40"
                 >
                   {updatingId === selectedAppointment.id
-                    ? "İptal ediliyor..."
-                    : "İptal Et"}
+                    ? "Siliniyor..."
+                    : "Manuel Randevuyu Sil"}
                 </button>
-              </div>
+              ) : (
+                <div className="mt-5 grid grid-cols-2 gap-2">
+                  <a
+                    href={`https://wa.me/${selectedAppointment.customer_phone.replace(
+                      /\D/g,
+                      ""
+                    )}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="rounded-xl border border-emerald-500/25 bg-emerald-500/[0.07] px-4 py-3 text-center text-sm font-semibold text-emerald-300"
+                  >
+                    WhatsApp
+                  </a>
+                  <button
+                    type="button"
+                    disabled={updatingId !== null}
+                    onClick={async () => {
+                      const confirmed = window.confirm(
+                        `${selectedAppointment.customer_name} adlı müşterinin randevusu iptal edilsin mi?`
+                      );
+                      if (!confirmed) return;
+
+                      await updateStatus(selectedAppointment.id, "cancelled");
+                      setSelectedAppointment((current) =>
+                        current ? { ...current, status: "cancelled" } : current
+                      );
+                    }}
+                    className="rounded-xl border border-red-500/25 bg-red-500/[0.07] px-4 py-3 text-sm font-semibold text-red-300 disabled:opacity-40"
+                  >
+                    {updatingId === selectedAppointment.id
+                      ? "İptal ediliyor..."
+                      : "İptal Et"}
+                  </button>
+                </div>
+              )
             )}
           </div>
         </div>
@@ -1264,7 +1509,7 @@ export default function AdminPage() {
                 </p>
                 <h1 className="mt-1.5 text-2xl font-bold sm:mt-2 sm:text-3xl">Randevu Yönetimi</h1>
                 <p className="mt-1.5 text-xs text-white/40 sm:mt-2 sm:text-sm">
-                  Bugünden başlayarak önündeki 7 günlük randevuları tek ekranda görüntüle.
+                  Takvim Pazartesi–Cumartesi sırasıyla haftalık randevuları gösterir.
                 </p>
               </div>
 
@@ -1332,7 +1577,7 @@ export default function AdminPage() {
             ) : (
               <div className="mt-4 overflow-hidden rounded-xl border border-white/10 bg-[#0d0d0d] sm:rounded-2xl">
                 <div className="w-full">
-                  <div className="grid grid-cols-[38px_repeat(7,minmax(0,1fr))] border-b border-white/10 bg-[#111111] sm:grid-cols-[54px_repeat(7,minmax(0,1fr))] lg:grid-cols-[62px_repeat(7,minmax(0,1fr))]">
+                  <div className="grid grid-cols-[38px_repeat(6,minmax(0,1fr))] border-b border-white/10 bg-[#111111] sm:grid-cols-[54px_repeat(6,minmax(0,1fr))] lg:grid-cols-[62px_repeat(6,minmax(0,1fr))]">
                     <div className="flex items-center justify-center border-r border-white/10 px-0.5 py-1.5 text-[6px] font-semibold text-white/30 sm:px-1 sm:py-2 sm:text-[8px] lg:text-[9px]">
                       SAAT
                     </div>
@@ -1379,7 +1624,7 @@ export default function AdminPage() {
                     return (
                       <div
                         key={slot}
-                        className="grid grid-cols-[38px_repeat(7,minmax(0,1fr))] border-b border-white/[0.07] last:border-b-0 sm:grid-cols-[54px_repeat(7,minmax(0,1fr))] lg:grid-cols-[62px_repeat(7,minmax(0,1fr))]"
+                        className="grid grid-cols-[38px_repeat(6,minmax(0,1fr))] border-b border-white/[0.07] last:border-b-0 sm:grid-cols-[54px_repeat(6,minmax(0,1fr))] lg:grid-cols-[62px_repeat(6,minmax(0,1fr))]"
                       >
                         <div className="flex min-h-[34px] items-center justify-center border-r border-white/10 bg-[#101010] px-0.5 text-[7px] font-bold text-[#c9a35b] sm:min-h-[40px] sm:px-1 sm:text-[9px] lg:min-h-[44px] lg:text-[10px]">
                           {slot}
@@ -1405,9 +1650,15 @@ export default function AdminPage() {
                                   onClick={() => setSelectedAppointment(appointment)}
                                 />
                               ) : (
-                                <div className="flex h-full min-h-[30px] items-center justify-center text-[5px] text-white/10 sm:min-h-[34px] sm:text-[7px] lg:text-[8px]">
-                                  Boş
-                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => openManualAppointment(day.key, slot)}
+                                  className="group flex h-full min-h-[30px] w-full items-center justify-center gap-1 text-white/15 transition hover:bg-[#c9a35b]/[0.06] hover:text-[#c9a35b] sm:min-h-[34px]"
+                                  title={`${formatDate(day.key)} ${slot} saatine müşteri ekle`}
+                                >
+                                  <span className="text-[11px] font-semibold sm:text-sm">+</span>
+                                  <span className="hidden text-[7px] sm:inline lg:text-[8px]">Boş</span>
+                                </button>
                               )}
                             </div>
                           );
