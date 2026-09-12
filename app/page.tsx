@@ -1771,7 +1771,7 @@ export default function Home() {
           HERO
       ====================================================== */}
 
-      <section className="relative z-10 flex items-center overflow-hidden px-5 pb-4 pt-20 md:pb-6 md:pt-24 lg:pb-10 lg:pt-28">
+      <section className="relative z-10 flex min-h-[100svh] items-center overflow-hidden px-5 pb-6 pt-20 md:pb-8 md:pt-24 lg:pt-28">
         
         <div className="pointer-events-none absolute inset-0">
           <div className="absolute left-[20%] top-[-350px] h-[800px] w-[800px] rounded-full bg-[#c9a35b]/[0.07] blur-[180px]" />
@@ -1942,15 +1942,15 @@ export default function Home() {
 
       <section
         id="yorumlar"
-        className="relative z-10 scroll-mt-24 overflow-hidden border-y border-white/[0.07] bg-transparent"
+        className="relative z-10 flex min-h-[100svh] scroll-mt-24 items-center overflow-hidden border-y border-white/[0.07] bg-transparent"
       >
-        <div className="relative z-10 mx-auto max-w-6xl px-5 pb-0 pt-2 md:pb-0 md:pt-3">
+        <div className="relative z-10 mx-auto w-full max-w-6xl px-5 py-16 md:py-20">
           <div className="flex items-end justify-between gap-4">
             <div>
-              <p className="text-[11px] font-semibold tracking-[0.28em] text-[#c9a35b] md:text-xs">
+              <p className="text-xs font-semibold tracking-[0.3em] text-[#c9a35b] md:text-sm">
                 MÜŞTERİ YORUMLARI
               </p>
-              <h2 className="mt-0.5 text-base font-bold md:text-lg">
+              <h2 className="mt-2 text-3xl font-bold md:text-4xl">
                 Değerlendirmeler
               </h2>
             </div>
@@ -1988,7 +1988,7 @@ export default function Home() {
             </div>
           ) : (
             <div
-              className={`mt-3 grid h-[210px] grid-cols-2 grid-rows-3 content-center gap-2.5 transition-all duration-300 ${
+              className={`mt-8 grid min-h-[360px] grid-cols-1 content-center gap-3 transition-all duration-300 sm:grid-cols-2 sm:grid-rows-3 md:min-h-[420px] md:gap-4 ${
                 reviewAnimating
                   ? "-translate-y-1 opacity-0"
                   : "translate-y-0 opacity-100"
@@ -2000,19 +2000,19 @@ export default function Home() {
                 .map((review) => (
                   <div
                     key={review.id}
-                    className="min-h-0 min-w-0 overflow-hidden rounded-xl border border-white/[0.11] bg-[#0b0b0b]/80 px-3 py-2.5"
+                    className="min-h-0 min-w-0 overflow-hidden rounded-2xl border border-white/[0.11] bg-[#0b0b0b]/80 px-4 py-4 md:px-5 md:py-5"
                   >
                     <div className="flex items-center gap-2">
-                      <p className="shrink-0 text-[10px] font-bold text-white/80">
+                      <p className="shrink-0 text-sm font-bold text-white/85 md:text-base">
                         {maskReviewName(review.customer_name)}
                       </p>
 
-                      <p className="shrink-0 whitespace-nowrap text-[9px] tracking-[-0.06em] text-[#c9a35b]">
+                      <p className="shrink-0 whitespace-nowrap text-xs text-[#c9a35b] md:text-sm">
                         {"★".repeat(review.rating)}
                       </p>
                     </div>
 
-                    <p className="mt-1.5 line-clamp-2 overflow-hidden text-[10px] leading-[14px] text-white/55">
+                    <p className="mt-2 line-clamp-3 overflow-hidden text-xs leading-5 text-white/55 md:text-sm md:leading-6">
                       {review.comment}
                     </p>
                   </div>
@@ -2028,11 +2028,9 @@ export default function Home() {
 
       <section
         id="iletisim"
-        className="z-10 relative overflow-hidden scroll-mt-24 bg-transparent"
+        className="relative z-10 flex min-h-[100svh] scroll-mt-24 items-center overflow-hidden bg-transparent"
       >
-
-
-        <div className="mx-auto max-w-6xl px-5 pb-24 pt-4 md:pt-6">
+        <div className="mx-auto w-full max-w-6xl px-5 py-16 md:py-20">
           <div className="grid gap-12 lg:grid-cols-2">
             <div>
               <p className="text-xs font-semibold tracking-[0.35em] text-[#c9a35b]">
