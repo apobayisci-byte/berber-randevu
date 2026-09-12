@@ -1211,7 +1211,7 @@ export default function Home() {
               ============================================= */}
 
               {appointmentStep === 2 && (
-                <section className="mt-6">
+                <section className="mt-4">
                   <div className="flex items-center justify-between gap-4">
                     <div>
                       <p className="text-[10px] tracking-[0.28em] text-[#c9a35b]">
@@ -1243,7 +1243,7 @@ export default function Home() {
                   )}
 
                   {!scheduleLoading && !scheduleError && (
-                    <div className="mt-4 grid grid-cols-4 gap-2 sm:grid-cols-7">
+                    <div className="mt-3 grid grid-cols-7 gap-1 sm:gap-1.5">
                       {dateOptions.map((date) => {
                         const active = selectedDate === date.value;
 
@@ -1254,21 +1254,21 @@ export default function Home() {
                               setSelectedDate(date.value);
                               setSelectedTime("");
                             }}
-                            className={`rounded-xl border px-1.5 py-2.5 text-center transition ${
+                            className={`min-w-0 rounded-lg border px-0.5 py-2 text-center transition ${
                               active
                                 ? "border-[#c9a35b] bg-[#c9a35b] text-black"
                                 : "border-white/10 bg-[#111]/90 hover:border-[#c9a35b]/40"
                             }`}
                           >
-                            <p className={`truncate text-[9px] font-semibold ${
+                            <p className={`truncate text-[7px] font-semibold sm:text-[8px] ${
                               active ? "text-black/60" : "text-white/35"
                             }`}>
                               {date.dayName}
                             </p>
-                            <p className="mt-0.5 text-lg font-bold">
+                            <p className="mt-0.5 text-sm font-bold sm:text-base">
                               {date.dayNumber}
                             </p>
-                            <p className={`text-[9px] ${
+                            <p className={`truncate text-[7px] sm:text-[8px] ${
                               active ? "text-black/60" : "text-[#c9a35b]"
                             }`}>
                               {date.monthName}
@@ -1282,7 +1282,7 @@ export default function Home() {
                   <button
                     onClick={handleDateContinue}
                     disabled={!selectedDate}
-                    className={`mt-5 w-full rounded-xl py-3.5 text-sm font-bold transition ${
+                    className={`mt-3 w-full rounded-xl py-3 text-sm font-bold transition ${
                       selectedDate
                         ? "bg-[#c9a35b] text-black hover:bg-[#dfbd76]"
                         : "cursor-not-allowed bg-white/5 text-white/20"
