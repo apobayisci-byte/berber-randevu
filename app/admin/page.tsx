@@ -62,6 +62,8 @@ export default function AdminPage() {
   const [notice, setNotice] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [updatingId, setUpdatingId] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
+  const [pushEnabled, setPushEnabled] = useState(false);
+  const [pushLoading, setPushLoading] = useState(false);
   const [newAppointmentNotice, setNewAppointmentNotice] = useState<{
     name: string;
     date: string;
@@ -212,6 +214,125 @@ export default function AdminPage() {
     setPassword("");
     await loadAll();
   };
+
+  const urlBase64ToUint8Array = (base64String: string) => {
+    const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+    const base64 = (base64String + padding)
+      .replace(/-/g, "+")
+      .replace(/_/g, "/");
+
+    const rawData = window.atob(base64);
+    return Uint8Array.from([...rawData].map((char) => char.charCodeAt(0)));
+  };
+
+  const enablePushNotifications = async () => {
+    if (pushLoading) return;
+
+    if (
+      !("serviceWorker" in navigator) ||
+      !("PushManager" in window) ||
+      !("Notification" in window)
+    ) {
+      showNotice("error", "Bu tarayıcı push bildirimlerini desteklemiyor.");
+      return;
+    }
+
+    const publicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
+    if (!publicKey) {
+      showNotice("error", "Push bildirim anahtarı bulunamadı.");
+      return;
+    }
+
+    setPushLoading(true);
+
+    try {
+      const permission = await Notification.requestPermission();
+
+      if (permission !== "granted") {
+        showNotice("error", "Bildirim izni verilmedi.");
+        setPushLoading(false);
+        return;
+      }
+
+      const registration = await navigator.serviceWorker.register("/sw.js");
+      await navigator.serviceWorker.ready;
+
+      let subscription = await registration.pushManager.getSubscription();
+
+      if (!subscription) {
+        subscription = await registration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(publicKey),
+        });
+      }
+
+      const subscriptionJson = subscription.toJSON();
+      const endpoint = subscriptionJson.endpoint;
+      const p256dh = subscriptionJson.keys?.p256dh;
+      const auth = subscriptionJson.keys?.auth;
+
+      if (!endpoint || !p256dh || !auth) {
+        throw new Error("Push abonelik bilgileri eksik.");
+      }
+
+      const {
+        data: { user },
+        error: userError,
+      } = await supabase.auth.getUser();
+
+      if (userError || !user) {
+        throw userError ?? new Error("Admin oturumu bulunamadı.");
+      }
+
+      const { error: saveError } = await supabase
+        .from("push_subscriptions")
+        .upsert(
+          {
+            user_id: user.id,
+            endpoint,
+            p256dh,
+            auth,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: "endpoint" }
+        );
+
+      if (saveError) throw saveError;
+
+      setPushEnabled(true);
+      showNotice("success", "Telefon bildirimleri açıldı.");
+    } catch (err) {
+      console.error("Push bildirimi açılamadı:", err);
+      showNotice("error", "Telefon bildirimleri açılamadı.");
+    } finally {
+      setPushLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!loggedIn) return;
+    if (
+      !("serviceWorker" in navigator) ||
+      !("PushManager" in window) ||
+      !("Notification" in window)
+    ) {
+      return;
+    }
+
+    const checkPush = async () => {
+      try {
+        const registration = await navigator.serviceWorker.register("/sw.js");
+        const subscription = await registration.pushManager.getSubscription();
+        setPushEnabled(
+          Notification.permission === "granted" && subscription !== null
+        );
+      } catch (err) {
+        console.error("Push durumu kontrol edilemedi:", err);
+      }
+    };
+
+    checkPush();
+  }, [loggedIn]);
 
   const logout = async () => {
     await supabase.auth.signOut();
@@ -466,7 +587,24 @@ export default function AdminPage() {
             <p className="font-bold">MURATHAN YAZAR</p>
             <p className="text-[10px] tracking-[0.3em] text-[#c9a35b]">YÖNETİM PANELİ</p>
           </div>
-          <button onClick={logout} className="rounded-xl border border-white/10 px-4 py-2 text-sm text-white/60 hover:text-white">Çıkış Yap</button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={enablePushNotifications}
+              disabled={pushLoading || pushEnabled}
+              className={`rounded-xl border px-4 py-2 text-sm font-semibold transition ${
+                pushEnabled
+                  ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
+                  : "border-[#c9a35b]/35 bg-[#c9a35b]/5 text-[#c9a35b] hover:bg-[#c9a35b]/10"
+              } disabled:cursor-default`}
+            >
+              {pushLoading
+                ? "Açılıyor..."
+                : pushEnabled
+                ? "🔔 Bildirimler Açık"
+                : "🔔 Bildirimleri Aç"}
+            </button>
+            <button onClick={logout} className="rounded-xl border border-white/10 px-4 py-2 text-sm text-white/60 hover:text-white">Çıkış Yap</button>
+          </div>
         </div>
       </header>
 

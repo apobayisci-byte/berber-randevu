@@ -483,33 +483,52 @@ export default function Home() {
     setAppointmentSaving(true);
     setAppointmentError("");
 
-    const supabase = createClient();
+    try {
+      const response = await fetch("/api/appointments", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          service_id: selectedServiceInfo.id,
+          customer_name: customerName.trim(),
+          customer_phone: customerPhone.trim(),
+          customer_note: customerNote.trim() || null,
+          appointment_date: selectedDate,
+          appointment_time: selectedTime,
+        }),
+      });
 
-    const { error } = await supabase.from("appointments").insert({
-      service_id: selectedServiceInfo.id,
-      customer_name: customerName.trim(),
-      customer_phone: customerPhone.trim(),
-      customer_note: customerNote.trim() || null,
-      appointment_date: selectedDate,
-      appointment_time: selectedTime,
-      status: "pending",
-    });
+      const result = (await response.json()) as {
+        success?: boolean;
+        error?: string;
+        code?: string;
+      };
 
-    if (error) {
-      console.error("Randevu oluşturulamadı:", error);
+      if (!response.ok) {
+        console.error("Randevu oluşturulamadı:", result);
 
-      if (error.code === "23505") {
-        setAppointmentError(
-          "Bu saat az önce başka bir müşteri tarafından alındı. Lütfen farklı bir saat seç."
-        );
-        setSelectedTime("");
-        setAppointmentStep(3);
-      } else {
-        setAppointmentError(
-          "Randevu şu anda oluşturulamadı. Lütfen tekrar deneyin."
-        );
+        if (result.code === "SLOT_TAKEN") {
+          setAppointmentError(
+            "Bu saat az önce başka bir müşteri tarafından alındı. Lütfen farklı bir saat seç."
+          );
+          setSelectedTime("");
+          setAppointmentStep(3);
+        } else {
+          setAppointmentError(
+            result.error ||
+              "Randevu şu anda oluşturulamadı. Lütfen tekrar deneyin."
+          );
+        }
+
+        setAppointmentSaving(false);
+        return;
       }
-
+    } catch (error) {
+      console.error("Randevu API bağlantı hatası:", error);
+      setAppointmentError(
+        "Randevu şu anda oluşturulamadı. Lütfen tekrar deneyin."
+      );
       setAppointmentSaving(false);
       return;
     }
@@ -1146,8 +1165,7 @@ export default function Home() {
                     <div className="mt-6 flex items-center gap-2 text-xs text-white/25">
                       <span className="h-2 w-2 rounded-full bg-[#c9a35b]" />
 
-                      Gün ve saatler artık veritabanındaki çalışma düzeninden geliyor.
-                      Bir sonraki adımda dolu saatleri otomatik kapatacağız.
+                      Gün, saat ve doluluk bilgileri güncel randevu düzenine göre gösterilir.
                     </div>
                   </div>
 
