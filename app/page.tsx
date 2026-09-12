@@ -52,6 +52,31 @@ type BusinessSettings = {
   appointment_interval: number;
 };
 
+type Review = {
+  id: number;
+  customer_name: string;
+  customer_phone: string;
+  rating: number;
+  comment: string;
+  created_at: string;
+};
+
+function maskReviewName(name: string) {
+  return name
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((part) => `${part.charAt(0).toLocaleUpperCase("tr-TR")}.`)
+    .join("");
+}
+
+function maskReviewPhone(phone: string) {
+  const digits = phone.replace(/\D/g, "");
+  const local = digits.startsWith("90") ? `0${digits.slice(2)}` : digits;
+  const firstFour = local.slice(0, 4) || "05XX";
+  return `${firstFour} *** ** **`;
+}
+
 function timeToMinutes(time: string) {
   const [hour, minute] = time.split(":").map(Number);
   return hour * 60 + minute;
@@ -145,7 +170,7 @@ export default function Home() {
   const [appointmentStep, setAppointmentStep] =
     useState<AppointmentStep>(1);
 
-  const [selectedService, setSelectedService] = useState("");
+  const [selectedServiceIds, setSelectedServiceIds] = useState<number[]>([]);
   const [selectedDate, setSelectedDate] = useState("");
   const [selectedTime, setSelectedTime] = useState("");
 
@@ -155,10 +180,22 @@ export default function Home() {
 
   const [appointmentCreated, setAppointmentCreated] =
     useState(false);
+  const [createdAppointmentId, setCreatedAppointmentId] = useState<number | null>(null);
   const [appointmentSaving, setAppointmentSaving] = useState(false);
   const [appointmentError, setAppointmentError] = useState("");
-  const [occupiedTimes, setOccupiedTimes] = useState<string[]>([]);
-  const [occupiedTimesLoading, setOccupiedTimesLoading] = useState(false);
+
+  const [reviews, setReviews] = useState<Review[]>([]);
+  const [reviewsLoading, setReviewsLoading] = useState(true);
+  const [reviewPage, setReviewPage] = useState(0);
+  const [reviewAnimating, setReviewAnimating] = useState(false);
+  const [reviewRating, setReviewRating] = useState(5);
+  const [reviewComment, setReviewComment] = useState("");
+  const [reviewSaving, setReviewSaving] = useState(false);
+  const [reviewError, setReviewError] = useState("");
+  const [reviewSent, setReviewSent] = useState(false);
+  const [availableTimes, setAvailableTimes] = useState<string[]>([]);
+  const [availableTimesLoading, setAvailableTimesLoading] = useState(false);
+  const [availabilityError, setAvailabilityError] = useState("");
 
   const dateOptions = useMemo(
     () => createDateOptions(workingHours),
@@ -260,6 +297,51 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    const loadReviews = async () => {
+      setReviewsLoading(true);
+
+      try {
+        const response = await fetch("/api/reviews", {
+          cache: "no-store",
+        });
+        const result = (await response.json()) as {
+          reviews?: Review[];
+        };
+
+        if (response.ok) {
+          setReviews(result.reviews ?? []);
+        }
+      } catch (error) {
+        console.error("Yorumlar alınamadı:", error);
+      } finally {
+        setReviewsLoading(false);
+      }
+    };
+
+    loadReviews();
+  }, []);
+
+  useEffect(() => {
+    if (reviews.length <= 6) {
+      setReviewPage(0);
+      return;
+    }
+
+    const pageCount = Math.ceil(reviews.length / 6);
+
+    const timer = window.setInterval(() => {
+      setReviewAnimating(true);
+
+      window.setTimeout(() => {
+        setReviewPage((current) => (current + 1) % pageCount);
+        setReviewAnimating(false);
+      }, 250);
+    }, 4500);
+
+    return () => window.clearInterval(timer);
+  }, [reviews.length]);
+
+  useEffect(() => {
     const loadSchedule = async () => {
       setScheduleLoading(true);
       setScheduleError("");
@@ -299,43 +381,58 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    const loadOccupiedTimes = async () => {
-      if (!selectedDate) {
-        setOccupiedTimes([]);
-        setOccupiedTimesLoading(false);
+    const loadAvailableTimes = async () => {
+      if (!selectedDate || selectedServiceIds.length === 0) {
+        setAvailableTimes([]);
+        setAvailableTimesLoading(false);
+        setAvailabilityError("");
         return;
       }
 
-      setOccupiedTimesLoading(true);
+      setAvailableTimesLoading(true);
+      setAvailabilityError("");
 
-      const supabase = createClient();
-      const { data, error } = await supabase.rpc("get_occupied_times", {
-        requested_date: selectedDate,
-      });
+      try {
+        const params = new URLSearchParams({
+          date: selectedDate,
+          service_ids: selectedServiceIds.join(","),
+        });
 
-      if (error) {
-        console.error("Dolu saatler alınamadı:", error);
-        setOccupiedTimes([]);
-        setOccupiedTimesLoading(false);
-        return;
+        const response = await fetch(`/api/appointments?${params.toString()}`, {
+          method: "GET",
+          cache: "no-store",
+        });
+
+        const result = (await response.json()) as {
+          available_times?: string[];
+          error?: string;
+        };
+
+        if (!response.ok) {
+          throw new Error(
+            result.error || "Uygun saatler şu anda alınamadı."
+          );
+        }
+
+        const times = result.available_times ?? [];
+        setAvailableTimes(times);
+
+        if (selectedTime && !times.includes(selectedTime)) {
+          setSelectedTime("");
+        }
+      } catch (error) {
+        console.error("Uygun saatler alınamadı:", error);
+        setAvailableTimes([]);
+        setAvailabilityError(
+          "Uygun saatler şu anda alınamadı. Lütfen tekrar deneyin."
+        );
+      } finally {
+        setAvailableTimesLoading(false);
       }
-
-      const times = (data ?? []).map(
-        (row: { appointment_time: string }) =>
-          row.appointment_time.slice(0, 5)
-      );
-
-      setOccupiedTimes(times);
-
-      if (selectedTime && times.includes(selectedTime)) {
-        setSelectedTime("");
-      }
-
-      setOccupiedTimesLoading(false);
     };
 
-    loadOccupiedTimes();
-  }, [selectedDate, selectedTime]);
+    loadAvailableTimes();
+  }, [selectedDate, selectedServiceIds, selectedTime]);
 
   const selectedDateInfo = dateOptions.find(
     (date) => date.value === selectedDate
@@ -355,23 +452,48 @@ export default function Home() {
     );
   }, [selectedWorkingDay, appointmentInterval]);
 
-  const selectedServiceInfo = services.find(
-    (service) => service.name === selectedService
+  const selectedServices = useMemo(
+    () =>
+      services.filter((service) =>
+        selectedServiceIds.includes(service.id)
+      ),
+    [services, selectedServiceIds]
+  );
+
+  const selectedServicesText = selectedServices
+    .map((service) => service.name)
+    .join(" + ");
+
+  const totalDuration = selectedServices.reduce(
+    (sum, service) => sum + service.duration_minutes,
+    0
+  );
+
+  const totalPrice = selectedServices.reduce(
+    (sum, service) => sum + Number(service.price ?? 0),
+    0
   );
 
   const resetAppointment = () => {
     setAppointmentStep(1);
-    setSelectedService("");
+    setSelectedServiceIds([]);
     setSelectedDate("");
     setSelectedTime("");
     setCustomerName("");
     setCustomerPhone("");
     setCustomerNote("");
     setAppointmentCreated(false);
+    setCreatedAppointmentId(null);
+    setReviewRating(5);
+    setReviewComment("");
+    setReviewSaving(false);
+    setReviewError("");
+    setReviewSent(false);
     setAppointmentSaving(false);
     setAppointmentError("");
-    setOccupiedTimes([]);
-    setOccupiedTimesLoading(false);
+    setAvailableTimes([]);
+    setAvailableTimesLoading(false);
+    setAvailabilityError("");
   };
 
   const goHome = () => {
@@ -397,10 +519,12 @@ export default function Home() {
   };
 
   const startAppointmentWithService = (serviceName: string) => {
-    setSelectedService(serviceName);
+    const service = services.find((item) => item.name === serviceName);
+
+    setSelectedServiceIds(service ? [service.id] : []);
     setSelectedDate("");
     setSelectedTime("");
-    setAppointmentStep(2);
+    setAppointmentStep(service ? 2 : 1);
     setAppointmentCreated(false);
     goAppointment();
   };
@@ -424,12 +548,12 @@ export default function Home() {
   };
 
   const goToStep = (step: AppointmentStep) => {
-    if (step === 2 && !selectedService) return;
-    if (step === 3 && (!selectedService || !selectedDate)) return;
+    if (step === 2 && selectedServiceIds.length === 0) return;
+    if (step === 3 && (selectedServiceIds.length === 0 || !selectedDate)) return;
 
     if (
       step === 4 &&
-      (!selectedService || !selectedDate || !selectedTime)
+      (selectedServiceIds.length === 0 || !selectedDate || !selectedTime)
     ) {
       return;
     }
@@ -445,7 +569,7 @@ export default function Home() {
   };
 
   const handleServiceContinue = () => {
-    if (!selectedService) return;
+    if (selectedServiceIds.length === 0) return;
 
     setAppointmentStep(2);
   };
@@ -470,7 +594,7 @@ export default function Home() {
 
   const handleCreateAppointment = async () => {
     if (
-      !selectedServiceInfo ||
+      selectedServiceIds.length === 0 ||
       !selectedDate ||
       !selectedTime ||
       !customerName.trim() ||
@@ -483,6 +607,8 @@ export default function Home() {
     setAppointmentSaving(true);
     setAppointmentError("");
 
+    let newAppointmentId: number | null = null;
+
     try {
       const response = await fetch("/api/appointments", {
         method: "POST",
@@ -490,7 +616,7 @@ export default function Home() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          service_id: selectedServiceInfo.id,
+          service_ids: selectedServiceIds,
           customer_name: customerName.trim(),
           customer_phone: customerPhone.trim(),
           customer_note: customerNote.trim() || null,
@@ -501,6 +627,7 @@ export default function Home() {
 
       const result = (await response.json()) as {
         success?: boolean;
+        appointment_id?: number;
         error?: string;
         code?: string;
       };
@@ -524,6 +651,8 @@ export default function Home() {
         setAppointmentSaving(false);
         return;
       }
+
+      newAppointmentId = result.appointment_id ?? null;
     } catch (error) {
       console.error("Randevu API bağlantı hatası:", error);
       setAppointmentError(
@@ -533,6 +662,7 @@ export default function Home() {
       return;
     }
 
+    setCreatedAppointmentId(newAppointmentId);
     setAppointmentCreated(true);
     setAppointmentSaving(false);
 
@@ -540,6 +670,60 @@ export default function Home() {
       top: 0,
       behavior: "smooth",
     });
+  };
+
+  const handleSubmitReview = async () => {
+    if (
+      !createdAppointmentId ||
+      !reviewComment.trim() ||
+      reviewSaving
+    ) {
+      return;
+    }
+
+    setReviewSaving(true);
+    setReviewError("");
+
+    try {
+      const response = await fetch("/api/reviews", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          appointment_id: createdAppointmentId,
+          customer_name: customerName.trim(),
+          customer_phone: customerPhone.trim(),
+          rating: reviewRating,
+          comment: reviewComment.trim(),
+        }),
+      });
+
+      const result = (await response.json()) as {
+        success?: boolean;
+        review?: Review;
+        error?: string;
+      };
+
+      if (!response.ok) {
+        setReviewError(
+          result.error || "Yorumunuz şu anda gönderilemedi."
+        );
+        setReviewSaving(false);
+        return;
+      }
+
+      if (result.review) {
+        setReviews((current) => [result.review as Review, ...current].slice(0, 10));
+      }
+
+      setReviewSent(true);
+    } catch (error) {
+      console.error("Yorum gönderilemedi:", error);
+      setReviewError("Yorumunuz şu anda gönderilemedi.");
+    } finally {
+      setReviewSaving(false);
+    }
   };
 
   // =========================================================
@@ -680,7 +864,7 @@ export default function Home() {
           </div>
         </header>
 
-        <div className="relative z-10 mx-auto max-w-5xl px-5 py-10 md:py-14">
+        <div className="relative z-10 mx-auto max-w-5xl px-4 py-3 md:px-5 md:py-5">
           {/* =================================================
               BAŞARILI DEMO RANDEVU
           ================================================= */}
@@ -696,13 +880,12 @@ export default function Home() {
               </p>
 
               <h1 className="mt-4 text-3xl font-bold md:text-5xl">
-                Randevu talebin alındı.
+                Randevun onaylandı.
               </h1>
 
               <p className="mx-auto mt-4 max-w-lg leading-7 text-white/45">
-                Bu ekran şu an demo olarak çalışıyor.
-                Veritabanını bağladığımızda randevu Murathan&apos;ın
-                yönetim paneline düşecek.
+                Randevun başarıyla oluşturuldu ve otomatik olarak onaylandı.
+                Tarih ve saat bilgilerini aşağıdan kontrol edebilirsin.
               </p>
 
               <div className="mt-10 rounded-3xl border border-[#c9a35b]/25 bg-[#c9a35b]/[0.06] p-7 text-left">
@@ -723,7 +906,7 @@ export default function Home() {
 
                   <SummaryRow
                     label="Hizmet"
-                    value={selectedService}
+                    value={selectedServicesText}
                   />
 
                   <SummaryRow
@@ -741,19 +924,81 @@ export default function Home() {
                 </div>
               </div>
 
-              <div className="mt-7 grid gap-3 sm:grid-cols-2">
+              <div className="mt-6 rounded-2xl border border-white/10 bg-black/25 p-5 text-left">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-[10px] tracking-[0.25em] text-[#c9a35b]">
+                      DEĞERLENDİR
+                    </p>
+                    <p className="mt-1 text-sm text-white/55">
+                      Randevu deneyimin için kısa bir yorum bırakabilirsin.
+                    </p>
+                  </div>
+                  <div className="flex gap-1">
+                    {[1, 2, 3, 4, 5].map((star) => (
+                      <button
+                        key={star}
+                        type="button"
+                        onClick={() => setReviewRating(star)}
+                        className={`text-xl ${
+                          star <= reviewRating
+                            ? "text-[#c9a35b]"
+                            : "text-white/15"
+                        }`}
+                      >
+                        ★
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {reviewSent ? (
+                  <div className="mt-4 rounded-xl border border-[#c9a35b]/25 bg-[#c9a35b]/10 px-4 py-3 text-sm text-[#c9a35b]">
+                    Teşekkürler. Yorumun yayınlandı. ✓
+                  </div>
+                ) : (
+                  <>
+                    <textarea
+                      value={reviewComment}
+                      onChange={(event) => setReviewComment(event.target.value)}
+                      maxLength={300}
+                      rows={2}
+                      placeholder="Değerlendirmeni yaz..."
+                      className="mt-4 w-full resize-none rounded-xl border border-white/10 bg-[#111] px-4 py-3 text-sm text-white outline-none placeholder:text-white/20 focus:border-[#c9a35b]/50"
+                    />
+
+                    {reviewError && (
+                      <p className="mt-2 text-xs text-red-300">
+                        {reviewError}
+                      </p>
+                    )}
+
+                    <button
+                      onClick={handleSubmitReview}
+                      disabled={!reviewComment.trim() || reviewSaving || !createdAppointmentId}
+                      className={`mt-3 w-full rounded-xl py-3 text-sm font-bold ${
+                        reviewComment.trim() && !reviewSaving && createdAppointmentId
+                          ? "bg-[#c9a35b] text-black"
+                          : "cursor-not-allowed bg-white/5 text-white/20"
+                      }`}
+                    >
+                      {reviewSaving ? "Gönderiliyor..." : "Yorumu Gönder"}
+                    </button>
+                  </>
+                )}
+              </div>
+
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
                 <button
-                  onClick={() => {
-                    resetAppointment();
-                  }}
-                  className="rounded-xl border border-white/15 px-6 py-4 font-semibold text-white/70 transition hover:border-white/30 hover:text-white"
+                  onClick={resetAppointment}
+                  className="rounded-xl border border-white/15 px-6 py-3 font-semibold text-white/70 transition hover:border-white/30 hover:text-white"
                 >
                   Yeni Randevu Oluştur
                 </button>
 
                 <button
                   onClick={goHome}
-                  className="rounded-xl bg-[#c9a35b] px-6 py-4 font-bold text-black transition hover:bg-[#dfbd76]"
+                  className="rounded-xl bg-[#c9a35b] px-6 py-3 font-bold text-black transition hover:bg-[#dfbd76]"
                 >
                   Ana Sayfaya Dön
                 </button>
@@ -795,7 +1040,7 @@ export default function Home() {
                 </div>
 
                 {/* İLERLEME ÇUBUĞU */}
-                <div className="mt-8 grid grid-cols-4 gap-2">
+                <div className="mt-3 grid grid-cols-4 gap-2">
                   {[
                     { number: 1, label: "Hizmet" },
                     { number: 2, label: "Tarih" },
@@ -855,104 +1100,107 @@ export default function Home() {
               ============================================= */}
 
               {appointmentStep === 1 && (
-                <section className="mt-12">
-                  <p className="text-xs tracking-[0.3em] text-[#c9a35b]">
-                    01 / HİZMET
-                  </p>
+                <section className="mt-4">
+                  <div className="flex items-end justify-between gap-4">
+                    <div>
+                      <p className="text-[10px] tracking-[0.28em] text-[#c9a35b]">
+                        01 / HİZMET
+                      </p>
+                      <h2 className="mt-0.5 text-lg font-semibold">
+                        Hizmetlerini seç
+                      </h2>
+                      <p className="mt-0.5 text-[11px] text-white/35">
+                        Bir veya birden fazla hizmet seçebilirsin.
+                      </p>
+                    </div>
 
-                  <h2 className="mt-2 text-2xl font-semibold">
-                    Ne yaptırmak istiyorsun?
-                  </h2>
-
-                  <p className="mt-2 text-sm text-white/35">
-                    Bir hizmet seçerek devam et.
-                  </p>
+                    {selectedServices.length > 0 && (
+                      <div className="text-right">
+                        <p className="text-xs text-white/30">
+                          {totalDuration} dk
+                        </p>
+                        <p className="text-sm font-bold text-[#c9a35b]">
+                          {formatServicePrice(totalPrice)}
+                        </p>
+                      </div>
+                    )}
+                  </div>
 
                   {servicesLoading && (
-                    <div className="mt-7 rounded-2xl border border-white/10 bg-[#111] p-6 text-sm text-white/40">
+                    <div className="mt-4 rounded-xl border border-white/10 bg-[#111] p-4 text-sm text-white/40">
                       Hizmetler yükleniyor...
                     </div>
                   )}
 
                   {servicesError && (
-                    <div className="mt-7 rounded-2xl border border-red-500/20 bg-red-500/5 p-6 text-sm text-red-300">
+                    <div className="mt-4 rounded-xl border border-red-500/20 bg-red-500/5 p-4 text-sm text-red-300">
                       {servicesError}
                     </div>
                   )}
 
                   {!servicesLoading && !servicesError && (
-                  <div className="mt-7 grid gap-3 md:grid-cols-3">
-                    {services.map((service) => {
-                      const active =
-                        selectedService === service.name;
+                    <div className="mt-2 grid grid-cols-2 gap-1">
+                      {services.slice(0, 10).map((service) => {
+                        const active = selectedServiceIds.includes(service.id);
 
-                      return (
-                        <button
-                          key={service.name}
-                          onClick={() => {
-                            setSelectedService(
-                              service.name
-                            );
-
-                            setSelectedDate("");
-                            setSelectedTime("");
-                          }}
-                          className={`rounded-2xl border p-6 text-left transition ${
-                            active
-                              ? "border-[#c9a35b] bg-[#c9a35b]/10"
-                              : "border-white/10 bg-[#111] hover:border-white/20"
-                          }`}
-                        >
-                          <div className="flex items-start justify-between">
-                            <span className="text-2xl text-[#c9a35b]">
-                              ✂
-                            </span>
-
-                            <div
-                              className={`flex h-6 w-6 items-center justify-center rounded-full border ${
+                        return (
+                          <button
+                            key={service.id}
+                            onClick={() => {
+                              setSelectedServiceIds((current) =>
                                 active
-                                  ? "border-[#c9a35b] bg-[#c9a35b]"
-                                  : "border-white/20"
-                              }`}
-                            >
-                              {active && (
-                                <span className="text-xs font-bold text-black">
-                                  ✓
-                                </span>
-                              )}
+                                  ? current.filter((id) => id !== service.id)
+                                  : [...current, service.id]
+                              );
+                              setSelectedDate("");
+                              setSelectedTime("");
+                            }}
+                            className={`flex min-h-[40px] items-center justify-between rounded-md border px-2 py-1 text-left transition ${
+                              active
+                                ? "border-[#c9a35b] bg-[#c9a35b]/10"
+                                : "border-white/10 bg-[#111]/90 hover:border-white/20"
+                            }`}
+                          >
+                            <div className="min-w-0 pr-1">
+                              <p className="truncate text-[10px] font-semibold leading-tight sm:text-[11px]">
+                                {service.name}
+                              </p>
+                              <p className="mt-0.5 text-[8px] leading-none text-white/35">
+                                {service.duration_minutes} dk
+                              </p>
                             </div>
-                          </div>
 
-                          <h3 className="mt-8 text-lg font-semibold">
-                            {service.name}
-                          </h3>
-
-                          <div className="mt-3 flex items-center justify-between">
-                            <p className="text-sm text-white/35">
-                              {formatServicePrice(service.price)}
-                            </p>
-
-                            <p className="text-xs text-[#c9a35b]">
-                              {service.duration_minutes} dk
-                            </p>
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
+                            <div className="ml-1 flex shrink-0 items-center gap-1.5">
+                              <span className="text-[9px] font-semibold text-[#c9a35b]">
+                                {formatServicePrice(service.price)}
+                              </span>
+                              <span
+                                className={`flex h-3.5 w-3.5 items-center justify-center rounded border text-[7px] ${
+                                  active
+                                    ? "border-[#c9a35b] bg-[#c9a35b] font-bold text-black"
+                                    : "border-white/20 text-transparent"
+                                }`}
+                              >
+                                ✓
+                              </span>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
                   )}
 
                   <button
                     onClick={handleServiceContinue}
-                    disabled={!selectedService}
-                    className={`mt-8 w-full rounded-xl py-4 font-bold transition ${
-                      selectedService
+                    disabled={selectedServiceIds.length === 0}
+                    className={`mt-2.5 w-full rounded-lg py-2.5 text-xs font-bold transition ${
+                      selectedServiceIds.length > 0
                         ? "bg-[#c9a35b] text-black hover:bg-[#dfbd76]"
                         : "cursor-not-allowed bg-white/5 text-white/20"
                     }`}
                   >
-                    {selectedService
-                      ? "Tarih Seçimine Devam Et →"
+                    {selectedServiceIds.length > 0
+                      ? `${selectedServiceIds.length} hizmet seçildi • Devam Et →`
                       : "Devam etmek için hizmet seç"}
                   </button>
                 </section>
@@ -963,112 +1211,78 @@ export default function Home() {
               ============================================= */}
 
               {appointmentStep === 2 && (
-                <section className="mt-12">
-                  <div className="flex items-end justify-between gap-5">
+                <section className="mt-6">
+                  <div className="flex items-center justify-between gap-4">
                     <div>
-                      <p className="text-xs tracking-[0.3em] text-[#c9a35b]">
+                      <p className="text-[10px] tracking-[0.28em] text-[#c9a35b]">
                         02 / TARİH
                       </p>
-
-                      <h2 className="mt-2 text-2xl font-semibold">
-                        Hangi gün gelsin?
+                      <h2 className="mt-1 text-xl font-semibold">
+                        Gününü seç
                       </h2>
-
-                      <p className="mt-2 text-sm text-white/35">
-                        Önümüzdeki 14 günden birini seç.
-                      </p>
                     </div>
 
                     <button
                       onClick={() => goToStep(1)}
-                      className="shrink-0 text-sm text-white/40 transition hover:text-white"
+                      className="text-xs text-white/40 transition hover:text-white"
                     >
-                      ← Hizmeti değiştir
+                      ← Hizmetler
                     </button>
                   </div>
 
                   {scheduleLoading && (
-                    <div className="mt-7 rounded-2xl border border-white/10 bg-[#111] p-6 text-sm text-white/40">
+                    <div className="mt-4 rounded-xl border border-white/10 bg-[#111] p-4 text-sm text-white/40">
                       Çalışma günleri yükleniyor...
                     </div>
                   )}
 
                   {scheduleError && (
-                    <div className="mt-7 rounded-2xl border border-red-500/20 bg-red-500/5 p-6 text-sm text-red-300">
+                    <div className="mt-4 rounded-xl border border-red-500/20 bg-red-500/5 p-4 text-sm text-red-300">
                       {scheduleError}
                     </div>
                   )}
 
-                  {!scheduleLoading && !scheduleError && dateOptions.length === 0 && (
-                    <div className="mt-7 rounded-2xl border border-white/10 bg-[#111] p-6 text-sm text-white/40">
-                      Önümüzdeki 14 gün için açık çalışma günü bulunmuyor.
-                    </div>
-                  )}
+                  {!scheduleLoading && !scheduleError && (
+                    <div className="mt-4 grid grid-cols-4 gap-2 sm:grid-cols-7">
+                      {dateOptions.map((date) => {
+                        const active = selectedDate === date.value;
 
-                  {!scheduleLoading && !scheduleError && dateOptions.length > 0 && (
-                  <div className="mt-7 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7">
-                    {dateOptions.map((date) => {
-                      const active =
-                        selectedDate === date.value;
-
-                      return (
-                        <button
-                          key={date.value}
-                          onClick={() => {
-                            setSelectedDate(date.value);
-                            setSelectedTime("");
-                          }}
-                          className={`rounded-2xl border px-3 py-5 text-center transition ${
-                            active
-                              ? "border-[#c9a35b] bg-[#c9a35b] text-black"
-                              : "border-white/10 bg-[#111] hover:border-[#c9a35b]/40"
-                          }`}
-                        >
-                          <p
-                            className={`text-xs font-semibold ${
+                        return (
+                          <button
+                            key={date.value}
+                            onClick={() => {
+                              setSelectedDate(date.value);
+                              setSelectedTime("");
+                            }}
+                            className={`rounded-xl border px-1.5 py-2.5 text-center transition ${
                               active
-                                ? "text-black/60"
-                                : "text-white/35"
+                                ? "border-[#c9a35b] bg-[#c9a35b] text-black"
+                                : "border-white/10 bg-[#111]/90 hover:border-[#c9a35b]/40"
                             }`}
                           >
-                            {date.dayName}
-                          </p>
-
-                          <p className="mt-2 text-2xl font-bold">
-                            {date.dayNumber}
-                          </p>
-
-                          <p
-                            className={`mt-1 text-xs ${
-                              active
-                                ? "text-black/60"
-                                : "text-[#c9a35b]"
-                            }`}
-                          >
-                            {date.monthName}
-                          </p>
-                        </button>
-                      );
-                    })}
-                  </div>
-                  )}
-
-                  {selectedDateInfo && (
-                    <div className="mt-5 rounded-xl border border-[#c9a35b]/20 bg-[#c9a35b]/[0.05] px-5 py-4">
-                      <p className="text-xs text-white/35">
-                        SEÇİLEN TARİH
-                      </p>
-
-                      <p className="mt-1 font-semibold capitalize text-[#c9a35b]">
-                        {selectedDateInfo.fullLabel}
-                      </p>
+                            <p className={`truncate text-[9px] font-semibold ${
+                              active ? "text-black/60" : "text-white/35"
+                            }`}>
+                              {date.dayName}
+                            </p>
+                            <p className="mt-0.5 text-lg font-bold">
+                              {date.dayNumber}
+                            </p>
+                            <p className={`text-[9px] ${
+                              active ? "text-black/60" : "text-[#c9a35b]"
+                            }`}>
+                              {date.monthName}
+                            </p>
+                          </button>
+                        );
+                      })}
                     </div>
                   )}
 
                   <button
                     onClick={handleDateContinue}
                     disabled={!selectedDate}
-                    className={`mt-8 w-full rounded-xl py-4 font-bold transition ${
+                    className={`mt-5 w-full rounded-xl py-3.5 text-sm font-bold transition ${
                       selectedDate
                         ? "bg-[#c9a35b] text-black hover:bg-[#dfbd76]"
                         : "cursor-not-allowed bg-white/5 text-white/20"
@@ -1086,93 +1300,80 @@ export default function Home() {
               ============================================= */}
 
               {appointmentStep === 3 && (
-                <section className="mt-12">
-                  <div className="flex items-end justify-between gap-5">
+                <section className="mt-6">
+                  <div className="flex items-center justify-between gap-4">
                     <div>
-                      <p className="text-xs tracking-[0.3em] text-[#c9a35b]">
+                      <p className="text-[10px] tracking-[0.28em] text-[#c9a35b]">
                         03 / SAAT
                       </p>
-
-                      <h2 className="mt-2 text-2xl font-semibold">
-                        Sana uygun saati seç.
+                      <h2 className="mt-1 text-xl font-semibold">
+                        Saatini seç
                       </h2>
-
-                      <p className="mt-2 text-sm text-white/35">
-                        {selectedWorkingDay
-                          ? `Çalışma saatleri ${selectedWorkingDay.open_time.slice(0, 5)}–${selectedWorkingDay.close_time.slice(0, 5)}.`
-                          : "Çalışma saatleri veritabanından yükleniyor."}
+                      <p className="mt-1 text-xs text-white/35">
+                        Toplam işlem süresi: {totalDuration} dk
                       </p>
                     </div>
 
                     <button
                       onClick={() => goToStep(2)}
-                      className="shrink-0 text-sm text-white/40 transition hover:text-white"
+                      className="text-xs text-white/40 transition hover:text-white"
                     >
-                      ← Tarihi değiştir
+                      ← Tarih
                     </button>
                   </div>
 
-                  <div className="mt-7 rounded-2xl border border-white/10 bg-[#0d0d0d] p-5 md:p-7">
-                    <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 pb-5">
-                      <div>
-                        <p className="text-xs text-white/30">
-                          SEÇİLEN GÜN
-                        </p>
+                  {availableTimesLoading && (
+                    <div className="mt-4 rounded-xl border border-white/10 bg-[#111] p-4 text-sm text-white/40">
+                      Uygun saatler kontrol ediliyor...
+                    </div>
+                  )}
 
-                        <p className="mt-1 font-semibold capitalize">
-                          {selectedDateInfo?.fullLabel}
-                        </p>
+                  {availabilityError && (
+                    <div className="mt-4 rounded-xl border border-red-500/20 bg-red-500/5 p-4 text-sm text-red-300">
+                      {availabilityError}
+                    </div>
+                  )}
+
+                  {!availableTimesLoading && !availabilityError && (
+                    <>
+                      <div className="mt-4 grid grid-cols-4 gap-2 sm:grid-cols-6 md:grid-cols-8">
+                        {timeSlots.map((time) => {
+                          const active = selectedTime === time;
+                          const available = availableTimes.includes(time);
+
+                          return (
+                            <button
+                              key={time}
+                              disabled={!available}
+                              onClick={() => {
+                                if (available) setSelectedTime(time);
+                              }}
+                              className={`rounded-lg border px-2 py-2.5 text-xs font-semibold transition ${
+                                !available
+                                  ? "cursor-not-allowed border-white/[0.05] bg-white/[0.02] text-white/15 line-through"
+                                  : active
+                                  ? "border-[#c9a35b] bg-[#c9a35b] text-black"
+                                  : "border-white/10 bg-[#131313] text-white/70 hover:border-[#c9a35b]/40"
+                              }`}
+                            >
+                              {time}
+                            </button>
+                          );
+                        })}
                       </div>
 
-                      <div className="rounded-full border border-[#c9a35b]/20 bg-[#c9a35b]/5 px-4 py-2 text-xs text-[#c9a35b]">
-                        {appointmentInterval} dk aralık
-                      </div>
-                    </div>
-
-                    <div className="mt-6 grid grid-cols-3 gap-3 sm:grid-cols-4 md:grid-cols-5">
-                      {timeSlots.map((time) => {
-                        const active = selectedTime === time;
-                        const occupied = occupiedTimes.includes(time);
-
-                        return (
-                          <button
-                            key={time}
-                            disabled={occupied || occupiedTimesLoading}
-                            onClick={() => {
-                              if (!occupied) setSelectedTime(time);
-                            }}
-                            className={`rounded-xl border px-3 py-4 text-sm font-semibold transition ${
-                              occupied
-                                ? "cursor-not-allowed border-red-500/15 bg-red-500/[0.04] text-white/20 line-through"
-                                : active
-                                ? "border-[#c9a35b] bg-[#c9a35b] text-black"
-                                : occupiedTimesLoading
-                                ? "cursor-wait border-white/10 bg-[#131313] text-white/25"
-                                : "border-white/10 bg-[#131313] text-white/70 hover:border-[#c9a35b]/40 hover:text-white"
-                            }`}
-                          >
-                            {time}
-                            {occupied && (
-                              <span className="mt-1 block text-[9px] font-normal no-underline text-red-300/50">
-                                DOLU
-                              </span>
-                            )}
-                          </button>
-                        );
-                      })}
-                    </div>
-
-                    <div className="mt-6 flex items-center gap-2 text-xs text-white/25">
-                      <span className="h-2 w-2 rounded-full bg-[#c9a35b]" />
-
-                      Gün, saat ve doluluk bilgileri güncel randevu düzenine göre gösterilir.
-                    </div>
-                  </div>
+                      {availableTimes.length === 0 && (
+                        <p className="mt-4 text-center text-xs text-white/35">
+                          Bu tarih için seçtiğin hizmetlere uygun boş saat bulunmuyor.
+                        </p>
+                      )}
+                    </>
+                  )}
 
                   <button
                     onClick={handleTimeContinue}
                     disabled={!selectedTime}
-                    className={`mt-8 w-full rounded-xl py-4 font-bold transition ${
+                    className={`mt-5 w-full rounded-xl py-3.5 text-sm font-bold transition ${
                       selectedTime
                         ? "bg-[#c9a35b] text-black hover:bg-[#dfbd76]"
                         : "cursor-not-allowed bg-white/5 text-white/20"
@@ -1296,7 +1497,7 @@ export default function Home() {
                       <div className="mt-6 space-y-5">
                         <SummaryRow
                           label="Hizmet"
-                          value={selectedService}
+                          value={selectedServicesText}
                         />
 
                         <SummaryRow
@@ -1314,11 +1515,12 @@ export default function Home() {
 
                         <SummaryRow
                           label="Süre"
-                          value={
-                            selectedServiceInfo
-                              ? `${selectedServiceInfo.duration_minutes} dk`
-                              : `${appointmentInterval} dk`
-                          }
+                          value={`${totalDuration} dk`}
+                        />
+
+                        <SummaryRow
+                          label="Toplam"
+                          value={formatServicePrice(totalPrice)}
                         />
                       </div>
                     </div>
@@ -1371,7 +1573,7 @@ export default function Home() {
                           </p>
 
                           <h3 className="mt-2 text-2xl font-bold">
-                            {selectedService}
+                            {selectedServicesText}
                           </h3>
                         </div>
 
@@ -1410,7 +1612,7 @@ export default function Home() {
                       <div className="space-y-5 border-t border-white/10 p-6 md:border-t-0 md:p-8">
                         <SummaryRow
                           label="Hizmet"
-                          value={selectedService}
+                          value={selectedServicesText}
                         />
 
                         <SummaryRow
@@ -1428,11 +1630,12 @@ export default function Home() {
 
                         <SummaryRow
                           label="Randevu Süresi"
-                          value={
-                            selectedServiceInfo
-                              ? `${selectedServiceInfo.duration_minutes} dk`
-                              : `${appointmentInterval} dk`
-                          }
+                          value={`${totalDuration} dk`}
+                        />
+
+                        <SummaryRow
+                          label="Toplam"
+                          value={formatServicePrice(totalPrice)}
                         />
                       </div>
                     </div>
@@ -1440,9 +1643,9 @@ export default function Home() {
 
                   <div className="mt-6 rounded-xl border border-white/10 bg-white/[0.025] p-4">
                     <p className="text-xs leading-6 text-white/35">
-                      Randevu oluşturulduğunda durumun “Onay Bekliyor”
-                      olarak kaydedilir. Aynı tarih ve saat için ikinci
-                      aktif randevu veritabanı tarafından engellenir.
+                      Randevu, uygun saat boşsa otomatik olarak onaylanır.
+                      Seçtiğin hizmetlerin toplam süresi boyunca çakışan başka
+                      randevu oluşturulamaz.
                     </p>
                   </div>
 
@@ -1531,11 +1734,11 @@ export default function Home() {
 
             <button
               onClick={() =>
-                scrollToSection("hizmetler")
+                scrollToSection("yorumlar")
               }
               className="text-sm text-white/60 transition hover:text-white"
             >
-              Hizmetler
+              Yorumlar
             </button>
 
             <button
@@ -1568,13 +1771,13 @@ export default function Home() {
           HERO
       ====================================================== */}
 
-      <section className="relative z-10 flex min-h-screen items-center overflow-hidden px-5 pt-24">
+      <section className="relative z-10 flex items-center overflow-hidden px-5 pb-4 pt-20 md:pb-6 md:pt-24 lg:min-h-screen">
         
         <div className="pointer-events-none absolute inset-0">
           <div className="absolute left-[20%] top-[-350px] h-[800px] w-[800px] rounded-full bg-[#c9a35b]/[0.07] blur-[180px]" />
         </div>
 
-        <div className="relative z-10 mx-auto grid w-full max-w-6xl items-center gap-16 lg:grid-cols-[1.15fr_0.85fr]">
+        <div className="relative z-10 mx-auto grid w-full max-w-6xl items-center gap-6 lg:grid-cols-[1.15fr_0.85fr] lg:gap-16">
           {/* SOL */}
           <div>
             <div className="inline-flex items-center gap-3 rounded-full border border-[#c9a35b]/40 bg-black/20 px-4 py-2 shadow-lg backdrop-blur-sm">
@@ -1608,26 +1811,26 @@ export default function Home() {
 
               <button
                 onClick={() =>
-                  scrollToSection("hizmetler")
+                  scrollToSection("yorumlar")
                 }
                 className="rounded-xl border border-white/30 bg-black/15 px-8 py-4 font-semibold shadow-xl backdrop-blur-sm transition hover:bg-black/30"
               >
-                Hizmetler & Fiyatlar
+                Müşteri Yorumları
               </button>
             </div>
 
-            <div className="mt-12 grid max-w-3xl gap-3 border-t border-white/25 pt-7 sm:grid-cols-3">
+            <div className="mt-4 grid max-w-3xl grid-cols-3 gap-1.5 border-t border-white/20 pt-3 md:mt-6 md:pt-4">
               <a
                 href={phoneHref}
-                className="group rounded-2xl border border-white/15 bg-black/25 p-4 backdrop-blur-sm transition hover:-translate-y-0.5 hover:border-[#c9a35b]/60 hover:bg-black/40"
+                className="group rounded-lg border border-white/15 bg-black/25 px-2 py-2 backdrop-blur-sm transition hover:border-[#c9a35b]/60 hover:bg-black/40"
               >
-                <p className="text-[11px] font-semibold tracking-[0.18em] text-white/50">
+                <p className="text-[8px] font-semibold tracking-[0.12em] text-white/50">
                   TEK DOKUNUŞLA
                 </p>
-                <p className="mt-2 text-sm font-semibold text-white transition group-hover:text-[#c9a35b]">
+                <p className="mt-1 text-[10px] font-semibold text-white transition group-hover:text-[#c9a35b]">
                   ☎ Ara
                 </p>
-                <p className="mt-1 text-xs text-white/55">
+                <p className="mt-0.5 text-[8px] text-white/55">
                   {phone}
                 </p>
               </a>
@@ -1636,28 +1839,28 @@ export default function Home() {
                 href={instagramHref}
                 target="_blank"
                 rel="noreferrer"
-                className="group rounded-2xl border border-white/15 bg-black/25 p-4 backdrop-blur-sm transition hover:-translate-y-0.5 hover:border-[#c9a35b]/60 hover:bg-black/40"
+                className="group rounded-lg border border-white/15 bg-black/25 px-2 py-2 backdrop-blur-sm transition hover:border-[#c9a35b]/60 hover:bg-black/40"
               >
-                <p className="text-[11px] font-semibold tracking-[0.18em] text-white/50">
+                <p className="text-[8px] font-semibold tracking-[0.12em] text-white/50">
                   INSTAGRAM
                 </p>
-                <p className="mt-2 text-sm font-semibold text-white transition group-hover:text-[#c9a35b]">
+                <p className="mt-1 text-[10px] font-semibold text-white transition group-hover:text-[#c9a35b]">
                   {instagram}
                 </p>
-                <p className="mt-1 text-xs text-white/55">
+                <p className="mt-0.5 text-[8px] text-white/55">
                   Profili aç →
                 </p>
               </a>
 
-              <div className="rounded-2xl border border-white/15 bg-black/25 p-4 backdrop-blur-sm">
-                <p className="text-[11px] font-semibold tracking-[0.18em] text-white/50">
+              <div className="rounded-lg border border-white/15 bg-black/25 px-2 py-2 backdrop-blur-sm">
+                <p className="text-[8px] font-semibold tracking-[0.12em] text-white/50">
                   BUGÜNKÜ SAAT
                 </p>
-                <p className="mt-2 text-sm font-semibold text-[#c9a35b]">
+                <p className="mt-1 text-[10px] font-semibold text-[#c9a35b]">
                   {todayWorkingHour}
                 </p>
-                <p className="mt-1 text-xs text-white/55">
-                  Yönetim panelindeki çalışma saatine göre
+                <p className="mt-0.5 text-[8px] text-white/55">
+                  Çalışma saatine göre
                 </p>
               </div>
             </div>
@@ -1734,95 +1937,88 @@ export default function Home() {
       </section>
 
       {/* =====================================================
-          HİZMETLER
+          MÜŞTERİ YORUMLARI
       ====================================================== */}
 
       <section
-        id="hizmetler"
+        id="yorumlar"
         className="relative z-10 scroll-mt-24 overflow-hidden border-y border-white/[0.07] bg-transparent"
       >
-        
-
-        <div className="relative z-10 mx-auto max-w-6xl px-5 py-24">
-          <div className="text-center">
-            <p className="text-xs font-semibold tracking-[0.35em] text-[#c9a35b]">
-              HİZMETLER & FİYATLAR
-            </p>
-
-            <h2 className="mt-4 text-4xl font-bold">
-              Hizmetler
-            </h2>
-
-            <p className="mx-auto mt-4 max-w-xl text-sm leading-7 text-white/40">
-              Hizmet ve fiyat bilgileri yönetim panelinden
-              güncellenebilecek.
-            </p>
-          </div>
-
-          {servicesLoading && (
-            <div className="mt-12 rounded-2xl border border-white/10 bg-[#111] p-7 text-center text-sm text-white/40">
-              Hizmetler yükleniyor...
+        <div className="relative z-10 mx-auto max-w-6xl px-5 pb-0 pt-2 md:pb-0 md:pt-3">
+          <div className="flex items-end justify-between gap-4">
+            <div>
+              <p className="text-[11px] font-semibold tracking-[0.28em] text-[#c9a35b] md:text-xs">
+                MÜŞTERİ YORUMLARI
+              </p>
+              <h2 className="mt-0.5 text-base font-bold md:text-lg">
+                Değerlendirmeler
+              </h2>
             </div>
-          )}
 
-          {servicesError && (
-            <div className="mt-12 rounded-2xl border border-red-500/20 bg-red-500/5 p-7 text-center text-sm text-red-300">
-              {servicesError}
-            </div>
-          )}
-
-          {!servicesLoading && !servicesError && (
-          <div className="mt-12 grid gap-4 md:grid-cols-3">
-            {services.map((service, index) => (
-              <div
-                key={service.name}
-                className={`group rounded-2xl border p-7 transition ${
-                  index === 2
-                    ? "border-[#c9a35b]/40 bg-[#c9a35b]/10"
-                    : "border-white/10 bg-[#111]"
-                }`}
-              >
-                <div className="flex items-start justify-between">
-                  <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-[#c9a35b]/10 text-xl text-[#c9a35b]">
-                    ✂
-                  </div>
-
-                  <span className="text-sm font-semibold text-[#c9a35b]">
-                    {formatServicePrice(service.price)}
-                  </span>
+            <div className="text-right">
+              <p className="text-[8px] text-white/25">
+                Son {Math.min(reviews.length, 10)} yorum
+              </p>
+              {reviews.length > 6 && (
+                <div className="mt-1 flex justify-end gap-1">
+                  {Array.from({
+                    length: Math.ceil(Math.min(reviews.length, 10) / 6),
+                  }).map((_, index) => (
+                    <span
+                      key={index}
+                      className={`h-1 rounded-full transition-all duration-300 ${
+                        index === reviewPage
+                          ? "w-3 bg-[#c9a35b]"
+                          : "w-1 bg-white/20"
+                      }`}
+                    />
+                  ))}
                 </div>
-
-                <h3 className="mt-7 text-xl font-semibold">
-                  {service.name}
-                </h3>
-
-                <p className="mt-2 text-sm text-white/35">
-                  ◷ {service.duration_minutes} dk
-                </p>
-
-                <button
-                  onClick={() =>
-                    startAppointmentWithService(
-                      service.name
-                    )
-                  }
-                  className="mt-7 text-sm font-semibold text-[#c9a35b] transition group-hover:translate-x-1"
-                >
-                  Bu hizmet için randevu al →
-                </button>
-              </div>
-            ))}
+              )}
+            </div>
           </div>
-          )}
 
-          <div className="mt-10 text-center">
-            <button
-              onClick={goAppointment}
-              className="rounded-xl bg-[#c9a35b] px-8 py-4 font-bold text-black transition hover:bg-[#dfbd76]"
+          {reviewsLoading ? (
+            <div className="mt-2 rounded-lg border border-white/10 bg-[#111]/80 p-3 text-xs text-white/35">
+              Yorumlar yükleniyor...
+            </div>
+          ) : reviews.length === 0 ? (
+            <div className="mt-2 rounded-lg border border-white/10 bg-[#111]/80 p-3 text-center text-xs text-white/35">
+              Henüz müşteri yorumu bulunmuyor.
+            </div>
+          ) : (
+            <div
+              className={`mt-3 grid h-[210px] grid-cols-2 grid-rows-3 content-center gap-2.5 transition-all duration-300 ${
+                reviewAnimating
+                  ? "-translate-y-1 opacity-0"
+                  : "translate-y-0 opacity-100"
+              }`}
             >
-              Hemen Randevu Al
-            </button>
-          </div>
+              {reviews
+                .slice(0, 10)
+                .slice(reviewPage * 6, reviewPage * 6 + 6)
+                .map((review) => (
+                  <div
+                    key={review.id}
+                    className="min-h-0 min-w-0 overflow-hidden rounded-xl border border-white/[0.11] bg-[#0b0b0b]/80 px-3 py-2.5"
+                  >
+                    <div className="flex items-center gap-2">
+                      <p className="shrink-0 text-[10px] font-bold text-white/80">
+                        {maskReviewName(review.customer_name)}
+                      </p>
+
+                      <p className="shrink-0 whitespace-nowrap text-[9px] tracking-[-0.06em] text-[#c9a35b]">
+                        {"★".repeat(review.rating)}
+                      </p>
+                    </div>
+
+                    <p className="mt-1.5 line-clamp-2 overflow-hidden text-[10px] leading-[14px] text-white/55">
+                      {review.comment}
+                    </p>
+                  </div>
+                ))}
+            </div>
+          )}
         </div>
       </section>
 
@@ -1836,7 +2032,7 @@ export default function Home() {
       >
 
 
-        <div className="mx-auto max-w-6xl px-5 py-24">
+        <div className="mx-auto max-w-6xl px-5 pb-24 pt-4 md:pt-6">
           <div className="grid gap-12 lg:grid-cols-2">
             <div>
               <p className="text-xs font-semibold tracking-[0.35em] text-[#c9a35b]">

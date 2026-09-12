@@ -8,7 +8,7 @@ import webpush from "web-push";
 export const runtime = "nodejs";
 
 type AppointmentRequest = {
-  service_id?: number;
+  service_ids?: number[];
   customer_name?: string;
   customer_phone?: string;
   customer_note?: string | null;
@@ -23,10 +23,29 @@ type PushSubscriptionRow = {
   auth: string;
 };
 
+type ServiceRow = {
+  id: number;
+  name: string;
+  price: number | null;
+  duration_minutes: number;
+  is_active: boolean;
+};
+
+type ExistingAppointment = {
+  appointment_time: string;
+  total_duration_minutes: number | null;
+};
+
 function timeToMinutes(time: string) {
   const [hours, minutes] = time.slice(0, 5).split(":").map(Number);
-
   return hours * 60 + minutes;
+}
+
+function minutesToTime(totalMinutes: number) {
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
 }
 
 function getIstanbulNow() {
@@ -61,6 +80,139 @@ function getDayOfWeek(date: string) {
   return jsDay === 0 ? 7 : jsDay;
 }
 
+function rangesOverlap(
+  startA: number,
+  durationA: number,
+  startB: number,
+  durationB: number
+) {
+  const endA = startA + durationA;
+  const endB = startB + durationB;
+
+  return startA < endB && startB < endA;
+}
+
+function normalizeServiceIds(input: unknown) {
+  if (!Array.isArray(input)) return [];
+
+  return Array.from(
+    new Set(
+      input
+        .map((value) => Number(value))
+        .filter((value) => Number.isInteger(value) && value > 0)
+    )
+  );
+}
+
+async function createAdminClient() {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  if (!supabaseUrl || !serviceRoleKey) {
+    return null;
+  }
+
+  return createClient(supabaseUrl, serviceRoleKey, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+    },
+  });
+}
+
+async function getServices(
+  supabaseAdmin: SupabaseClient<any, "public", any>,
+  serviceIds: number[]
+) {
+  const { data, error } = await supabaseAdmin
+    .from("services")
+    .select("id, name, price, duration_minutes, is_active")
+    .in("id", serviceIds)
+    .eq("is_active", true);
+
+  if (error) {
+    throw new Error(`SERVICES:${error.message}`);
+  }
+
+  const services = (data ?? []) as ServiceRow[];
+
+  if (services.length !== serviceIds.length) {
+    return null;
+  }
+
+  const order = new Map(serviceIds.map((id, index) => [id, index]));
+  return services.sort(
+    (a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0)
+  );
+}
+
+async function getDayConfiguration(
+  supabaseAdmin: SupabaseClient<any, "public", any>,
+  appointmentDate: string
+) {
+  const dayOfWeek = getDayOfWeek(appointmentDate);
+
+  const [workingHourResult, settingsResult] = await Promise.all([
+    supabaseAdmin
+      .from("working_hours")
+      .select("day_of_week, is_open, open_time, close_time")
+      .eq("day_of_week", dayOfWeek)
+      .maybeSingle(),
+    supabaseAdmin
+      .from("business_settings")
+      .select("appointment_interval")
+      .eq("id", 1)
+      .maybeSingle(),
+  ]);
+
+  if (workingHourResult.error || settingsResult.error) {
+    throw new Error("SCHEDULE");
+  }
+
+  const workingHour = workingHourResult.data;
+  const appointmentInterval =
+    Number(settingsResult.data?.appointment_interval) || 45;
+
+  if (
+    !workingHour ||
+    !workingHour.is_open ||
+    !Number.isInteger(appointmentInterval) ||
+    appointmentInterval <= 0
+  ) {
+    return null;
+  }
+
+  return {
+    workingHour,
+    appointmentInterval,
+  };
+}
+
+async function getExistingAppointments(
+  supabaseAdmin: SupabaseClient<any, "public", any>,
+  appointmentDate: string,
+  fallbackDuration: number
+) {
+  const { data, error } = await supabaseAdmin
+    .from("appointments")
+    .select("appointment_time, total_duration_minutes")
+    .eq("appointment_date", appointmentDate)
+    .in("status", ["pending", "approved"])
+    .eq("is_archived", false);
+
+  if (error) {
+    throw new Error(`APPOINTMENTS:${error.message}`);
+  }
+
+  return ((data ?? []) as ExistingAppointment[]).map((appointment) => ({
+    start: timeToMinutes(appointment.appointment_time),
+    duration:
+      Number(appointment.total_duration_minutes) > 0
+        ? Number(appointment.total_duration_minutes)
+        : fallbackDuration,
+  }));
+}
+
 async function sendPushNotifications(
   supabaseAdmin: SupabaseClient<any, "public", any>,
   appointment: {
@@ -91,10 +243,6 @@ async function sendPushNotifications(
   }
 
   const subscriptions = (data ?? []) as PushSubscriptionRow[];
-
-  if (subscriptions.length === 0) {
-    return;
-  }
 
   const payload = JSON.stringify({
     title: "Yeni randevu 🔔",
@@ -142,401 +290,300 @@ async function sendPushNotifications(
   );
 }
 
-export async function POST(request: Request) {
+export async function GET(request: Request) {
   try {
-    const supabaseUrl =
-      process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const supabaseAdmin = await createAdminClient();
 
-    const serviceRoleKey =
-      process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-    if (!supabaseUrl || !serviceRoleKey) {
-      console.error(
-        "Supabase sunucu environment değişkenleri eksik."
-      );
-
+    if (!supabaseAdmin) {
       return NextResponse.json(
-        {
-          error: "Sunucu yapılandırması eksik.",
-        },
-        {
-          status: 500,
-        }
+        { error: "Sunucu yapılandırması eksik." },
+        { status: 500 }
       );
     }
 
-    const supabaseAdmin = createClient(
-      supabaseUrl,
-      serviceRoleKey,
-      {
-        auth: {
-          persistSession: false,
-          autoRefreshToken: false,
-        },
-      }
+    const url = new URL(request.url);
+    const appointmentDate = url.searchParams.get("date")?.trim() ?? "";
+    const serviceIds = normalizeServiceIds(
+      (url.searchParams.get("service_ids") ?? "")
+        .split(",")
+        .filter(Boolean)
     );
 
-    const body =
-      (await request.json()) as AppointmentRequest;
+    if (
+      !/^\d{4}-\d{2}-\d{2}$/.test(appointmentDate) ||
+      serviceIds.length === 0
+    ) {
+      return NextResponse.json(
+        { error: "Tarih veya hizmet bilgisi geçersiz." },
+        { status: 400 }
+      );
+    }
 
-    const serviceId = Number(body.service_id);
+    const services = await getServices(supabaseAdmin, serviceIds);
 
-    const customerName =
-      body.customer_name?.trim() ?? "";
+    if (!services) {
+      return NextResponse.json(
+        { error: "Seçilen hizmetlerden biri artık kullanılamıyor." },
+        { status: 400 }
+      );
+    }
 
-    const customerPhone =
-      body.customer_phone?.trim() ?? "";
+    const totalDuration = services.reduce(
+      (sum, service) => sum + service.duration_minutes,
+      0
+    );
 
-    const customerNote =
-      body.customer_note?.trim() || null;
+    const configuration = await getDayConfiguration(
+      supabaseAdmin,
+      appointmentDate
+    );
 
-    const appointmentDate =
-      body.appointment_date?.trim() ?? "";
+    if (!configuration) {
+      return NextResponse.json({ available_times: [] });
+    }
 
+    const { workingHour, appointmentInterval } = configuration;
+    const openMinutes = timeToMinutes(workingHour.open_time);
+    const closeMinutes = timeToMinutes(workingHour.close_time);
+    const existingAppointments = await getExistingAppointments(
+      supabaseAdmin,
+      appointmentDate,
+      appointmentInterval
+    );
+
+    const now = getIstanbulNow();
+    const nowMinutes = timeToMinutes(now.time);
+    const availableTimes: string[] = [];
+
+    for (
+      let start = openMinutes;
+      start + totalDuration <= closeMinutes;
+      start += appointmentInterval
+    ) {
+      if (
+        appointmentDate < now.date ||
+        (appointmentDate === now.date && start <= nowMinutes)
+      ) {
+        continue;
+      }
+
+      const overlaps = existingAppointments.some((existing) =>
+        rangesOverlap(
+          start,
+          totalDuration,
+          existing.start,
+          existing.duration
+        )
+      );
+
+      if (!overlaps) {
+        availableTimes.push(minutesToTime(start));
+      }
+    }
+
+    return NextResponse.json({
+      available_times: availableTimes,
+      total_duration_minutes: totalDuration,
+    });
+  } catch (error) {
+    console.error("Availability API hatası:", error);
+
+    return NextResponse.json(
+      { error: "Uygun saatler şu anda alınamadı." },
+      { status: 500 }
+    );
+  }
+}
+
+export async function POST(request: Request) {
+  try {
+    const supabaseAdmin = await createAdminClient();
+
+    if (!supabaseAdmin) {
+      return NextResponse.json(
+        { error: "Sunucu yapılandırması eksik." },
+        { status: 500 }
+      );
+    }
+
+    const body = (await request.json()) as AppointmentRequest;
+    const serviceIds = normalizeServiceIds(body.service_ids);
+
+    const customerName = body.customer_name?.trim() ?? "";
+    const customerPhone = body.customer_phone?.trim() ?? "";
+    const customerNote = body.customer_note?.trim() || null;
+    const appointmentDate = body.appointment_date?.trim() ?? "";
     const appointmentTime =
       body.appointment_time?.trim().slice(0, 5) ?? "";
 
     if (
-      !Number.isInteger(serviceId) ||
-      serviceId <= 0 ||
+      serviceIds.length === 0 ||
       !customerName ||
       !customerPhone ||
       !appointmentDate ||
       !appointmentTime
     ) {
       return NextResponse.json(
-        {
-          error:
-            "Eksik veya geçersiz randevu bilgisi.",
-        },
-        {
-          status: 400,
-        }
+        { error: "Eksik veya geçersiz randevu bilgisi." },
+        { status: 400 }
       );
     }
 
-    if (
-      customerName.length < 2 ||
-      customerName.length > 80
-    ) {
+    if (serviceIds.length > 10) {
       return NextResponse.json(
-        {
-          error: "Ad soyad bilgisi geçersiz.",
-        },
-        {
-          status: 400,
-        }
+        { error: "En fazla 10 hizmet seçilebilir." },
+        { status: 400 }
       );
     }
 
-    if (
-      customerPhone.length < 7 ||
-      customerPhone.length > 25
-    ) {
+    if (customerName.length < 2 || customerName.length > 80) {
       return NextResponse.json(
-        {
-          error: "Telefon numarası geçersiz.",
-        },
-        {
-          status: 400,
-        }
+        { error: "Ad soyad bilgisi geçersiz." },
+        { status: 400 }
       );
     }
 
-    if (
-      customerNote &&
-      customerNote.length > 500
-    ) {
+    if (customerPhone.length < 7 || customerPhone.length > 25) {
       return NextResponse.json(
-        {
-          error: "Randevu notu çok uzun.",
-        },
-        {
-          status: 400,
-        }
+        { error: "Telefon numarası geçersiz." },
+        { status: 400 }
       );
     }
 
-    if (
-      !/^\d{4}-\d{2}-\d{2}$/.test(
-        appointmentDate
-      )
-    ) {
+    if (customerNote && customerNote.length > 500) {
       return NextResponse.json(
-        {
-          error: "Randevu tarihi geçersiz.",
-        },
-        {
-          status: 400,
-        }
+        { error: "Randevu notu çok uzun." },
+        { status: 400 }
       );
     }
 
-    if (
-      !/^\d{2}:\d{2}$/.test(
-        appointmentTime
-      )
-    ) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(appointmentDate)) {
       return NextResponse.json(
-        {
-          error: "Randevu saati geçersiz.",
-        },
-        {
-          status: 400,
-        }
+        { error: "Randevu tarihi geçersiz." },
+        { status: 400 }
       );
     }
 
-    const requestedMinutes =
-      timeToMinutes(appointmentTime);
-
-    if (
-      !Number.isFinite(requestedMinutes) ||
-      requestedMinutes < 0 ||
-      requestedMinutes >= 24 * 60
-    ) {
+    if (!/^\d{2}:\d{2}$/.test(appointmentTime)) {
       return NextResponse.json(
-        {
-          error: "Randevu saati geçersiz.",
-        },
-        {
-          status: 400,
-        }
+        { error: "Randevu saati geçersiz." },
+        { status: 400 }
       );
     }
 
+    const requestedMinutes = timeToMinutes(appointmentTime);
     const now = getIstanbulNow();
 
     if (
       appointmentDate < now.date ||
-      (
-        appointmentDate === now.date &&
-        appointmentTime <= now.time
-      )
+      (appointmentDate === now.date && appointmentTime <= now.time)
     ) {
       return NextResponse.json(
-        {
-          error:
-            "Geçmiş bir tarih veya saat için randevu oluşturulamaz.",
-        },
-        {
-          status: 400,
-        }
+        { error: "Geçmiş bir tarih veya saat için randevu oluşturulamaz." },
+        { status: 400 }
       );
     }
 
-    const {
-      data: service,
-      error: serviceError,
-    } = await supabaseAdmin
-      .from("services")
-      .select("id, name, price, is_active")
-      .eq("id", serviceId)
-      .eq("is_active", true)
-      .maybeSingle();
+    const services = await getServices(supabaseAdmin, serviceIds);
 
-    if (serviceError) {
-      console.error(
-        "Hizmet kontrolü başarısız:",
-        serviceError
-      );
-
+    if (!services) {
       return NextResponse.json(
-        {
-          error:
-            "Hizmet bilgisi kontrol edilemedi.",
-        },
-        {
-          status: 500,
-        }
+        { error: "Seçilen hizmetlerden biri artık kullanılamıyor." },
+        { status: 400 }
       );
     }
 
-    if (!service) {
+    const totalDuration = services.reduce(
+      (sum, service) => sum + service.duration_minutes,
+      0
+    );
+    const totalPrice = services.reduce(
+      (sum, service) => sum + Number(service.price ?? 0),
+      0
+    );
+
+    const configuration = await getDayConfiguration(
+      supabaseAdmin,
+      appointmentDate
+    );
+
+    if (!configuration) {
       return NextResponse.json(
-        {
-          error:
-            "Seçilen hizmet artık kullanılamıyor.",
-        },
-        {
-          status: 400,
-        }
+        { error: "Berber seçilen gün çalışmıyor." },
+        { status: 400 }
       );
     }
 
-    const dayOfWeek =
-      getDayOfWeek(appointmentDate);
-
-    const {
-      data: workingHour,
-      error: workingHourError,
-    } = await supabaseAdmin
-      .from("working_hours")
-      .select(
-        "day_of_week, is_open, open_time, close_time"
-      )
-      .eq("day_of_week", dayOfWeek)
-      .maybeSingle();
-
-    if (workingHourError) {
-      console.error(
-        "Çalışma saatleri kontrol edilemedi:",
-        workingHourError
-      );
-
-      return NextResponse.json(
-        {
-          error:
-            "Çalışma saatleri kontrol edilemedi.",
-        },
-        {
-          status: 500,
-        }
-      );
-    }
-
-    if (
-      !workingHour ||
-      !workingHour.is_open
-    ) {
-      return NextResponse.json(
-        {
-          error:
-            "Berber seçilen gün çalışmıyor.",
-        },
-        {
-          status: 400,
-        }
-      );
-    }
-
-    const {
-      data: settings,
-      error: settingsError,
-    } = await supabaseAdmin
-      .from("business_settings")
-      .select("appointment_interval")
-      .eq("id", 1)
-      .maybeSingle();
-
-    if (settingsError) {
-      console.error(
-        "İşletme ayarları kontrol edilemedi:",
-        settingsError
-      );
-
-      return NextResponse.json(
-        {
-          error:
-            "Randevu ayarları kontrol edilemedi.",
-        },
-        {
-          status: 500,
-        }
-      );
-    }
-
-    const appointmentInterval =
-      Number(
-        settings?.appointment_interval
-      ) || 45;
-
-    if (
-      !Number.isInteger(
-        appointmentInterval
-      ) ||
-      appointmentInterval <= 0
-    ) {
-      return NextResponse.json(
-        {
-          error:
-            "Randevu aralığı yapılandırması geçersiz.",
-        },
-        {
-          status: 500,
-        }
-      );
-    }
-
-    const openMinutes =
-      timeToMinutes(
-        workingHour.open_time
-      );
-
-    const closeMinutes =
-      timeToMinutes(
-        workingHour.close_time
-      );
+    const { workingHour, appointmentInterval } = configuration;
+    const openMinutes = timeToMinutes(workingHour.open_time);
+    const closeMinutes = timeToMinutes(workingHour.close_time);
 
     if (
       requestedMinutes < openMinutes ||
-      requestedMinutes >= closeMinutes
+      requestedMinutes + totalDuration > closeMinutes ||
+      (requestedMinutes - openMinutes) % appointmentInterval !== 0
     ) {
       return NextResponse.json(
-        {
-          error:
-            "Seçilen saat çalışma saatleri dışında.",
-        },
-        {
-          status: 400,
-        }
+        { error: "Seçilen saat bu hizmetler için uygun değil." },
+        { status: 400 }
       );
     }
 
-    if (
-      (requestedMinutes - openMinutes) %
-        appointmentInterval !==
-      0
-    ) {
+    const existingAppointments = await getExistingAppointments(
+      supabaseAdmin,
+      appointmentDate,
+      appointmentInterval
+    );
+
+    const overlaps = existingAppointments.some((existing) =>
+      rangesOverlap(
+        requestedMinutes,
+        totalDuration,
+        existing.start,
+        existing.duration
+      )
+    );
+
+    if (overlaps) {
       return NextResponse.json(
         {
-          error:
-            "Seçilen saat geçerli bir randevu aralığı değil.",
+          error: "Bu saat az önce başka bir müşteri tarafından alındı.",
+          code: "SLOT_TAKEN",
         },
-        {
-          status: 400,
-        }
+        { status: 409 }
       );
     }
 
-    const {
-      data: appointment,
-      error: insertError,
-    } = await supabaseAdmin
-      .from("appointments")
-      .insert({
-        service_id: serviceId,
-        price_at_booking: service.price,
-        customer_name: customerName,
-        customer_phone: customerPhone,
-        customer_note: customerNote,
-        appointment_date:
-          appointmentDate,
-        appointment_time:
-          appointmentTime,
-        status: "pending",
-      })
-      .select("id")
-      .single();
+    const primaryService = services[0];
+
+    const { data: appointment, error: insertError } =
+      await supabaseAdmin
+        .from("appointments")
+        .insert({
+          service_id: primaryService.id,
+          price_at_booking: totalPrice,
+          total_price: totalPrice,
+          total_duration_minutes: totalDuration,
+          customer_name: customerName,
+          customer_phone: customerPhone,
+          customer_note: customerNote,
+          appointment_date: appointmentDate,
+          appointment_time: appointmentTime,
+          status: "approved",
+        })
+        .select("id")
+        .single();
 
     if (insertError) {
-      console.error(
-        "Randevu oluşturulamadı:",
-        insertError
-      );
+      console.error("Randevu oluşturulamadı:", insertError);
 
-      if (
-        insertError.code === "23505"
-      ) {
+      if (insertError.code === "23505") {
         return NextResponse.json(
           {
-            error:
-              "Bu saat az önce başka bir müşteri tarafından alındı.",
+            error: "Bu saat az önce başka bir müşteri tarafından alındı.",
             code: "SLOT_TAKEN",
           },
-          {
-            status: 409,
-          }
+          { status: 409 }
         );
       }
 
@@ -545,46 +592,66 @@ export async function POST(request: Request) {
           error:
             "Randevu şu anda oluşturulamadı. Lütfen tekrar deneyin.",
         },
-        {
-          status: 500,
-        }
+        { status: 500 }
       );
     }
 
-    await sendPushNotifications(
-      supabaseAdmin,
-      {
-        customerName,
-        date: appointmentDate,
-        time: appointmentTime,
-        serviceName: service.name,
-      }
-    );
+    const appointmentServices = services.map((service) => ({
+      appointment_id: appointment.id,
+      service_id: service.id,
+      service_name: service.name,
+      price_at_booking: Number(service.price ?? 0),
+      duration_minutes: service.duration_minutes,
+    }));
+
+    const { error: serviceInsertError } = await supabaseAdmin
+      .from("appointment_services")
+      .insert(appointmentServices);
+
+    if (serviceInsertError) {
+      console.error(
+        "Randevu hizmetleri kaydedilemedi:",
+        serviceInsertError
+      );
+
+      await supabaseAdmin
+        .from("appointments")
+        .delete()
+        .eq("id", appointment.id);
+
+      return NextResponse.json(
+        {
+          error:
+            "Randevu hizmetleri kaydedilemedi. Lütfen tekrar deneyin.",
+        },
+        { status: 500 }
+      );
+    }
+
+    await sendPushNotifications(supabaseAdmin, {
+      customerName,
+      date: appointmentDate,
+      time: appointmentTime,
+      serviceName: services.map((service) => service.name).join(" + "),
+    });
 
     return NextResponse.json(
       {
         success: true,
-        appointment_id:
-          appointment.id,
+        appointment_id: appointment.id,
+        status: "approved",
       },
-      {
-        status: 201,
-      }
+      { status: 201 }
     );
   } catch (error) {
-    console.error(
-      "Appointment API hatası:",
-      error
-    );
+    console.error("Appointment API hatası:", error);
 
     return NextResponse.json(
       {
         error:
           "Beklenmeyen bir sunucu hatası oluştu. Lütfen tekrar deneyin.",
       },
-      {
-        status: 500,
-      }
+      { status: 500 }
     );
   }
 }
