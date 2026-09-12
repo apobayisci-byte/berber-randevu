@@ -1771,7 +1771,7 @@ export default function Home() {
           HERO
       ====================================================== */}
 
-      <section className="relative z-10 flex items-center overflow-hidden px-5 pb-4 pt-20 md:pb-6 md:pt-24 lg:min-h-screen">
+      <section className="relative z-10 flex items-center overflow-hidden px-5 pb-4 pt-20 md:pb-6 md:pt-24 lg:pb-10 lg:pt-28">
         
         <div className="pointer-events-none absolute inset-0">
           <div className="absolute left-[20%] top-[-350px] h-[800px] w-[800px] rounded-full bg-[#c9a35b]/[0.07] blur-[180px]" />
