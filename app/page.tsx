@@ -208,6 +208,25 @@ export default function Home() {
     return `${openDays.length} gün açık • Saatler güne göre değişiyor`;
   }, [workingHours]);
 
+  const todayWorkingHour = useMemo(() => {
+    if (workingHours.length === 0) {
+      return "Saat bilgisi yükleniyor";
+    }
+
+    const now = new Date();
+    const jsDay = now.getDay();
+    const dayOfWeek = jsDay === 0 ? 7 : jsDay;
+    const today = workingHours.find(
+      (item) => item.day_of_week === dayOfWeek
+    );
+
+    if (!today || !today.is_open) {
+      return "Bugün kapalı";
+    }
+
+    return `Bugün ${today.open_time.slice(0, 5)}–${today.close_time.slice(0, 5)}`;
+  }, [workingHours]);
+
   useEffect(() => {
     const loadServices = async () => {
       setServicesLoading(true);
@@ -512,9 +531,15 @@ export default function Home() {
     return (
       <main className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[#080808] px-6 text-white">
         <div
-          className="absolute inset-0 scale-[1.02] bg-cover bg-center bg-no-repeat"
+          className="absolute inset-0 scale-[1.02] bg-cover bg-center bg-no-repeat md:hidden"
           style={{
-            backgroundImage: "url('/berber-bg.png')",
+            backgroundImage: "url('/berber-bg-mobile.png')",
+          }}
+        />
+        <div
+          className="absolute inset-0 hidden scale-[1.02] bg-cover bg-center bg-no-repeat md:block"
+          style={{
+            backgroundImage: "url('/berber-bg-desktop.png')",
           }}
         />
 
@@ -593,6 +618,16 @@ export default function Home() {
   if (view === "appointment") {
     return (
       <main className="relative min-h-screen overflow-hidden bg-[#080808] text-white">
+        <div
+          className="pointer-events-none fixed inset-0 bg-cover bg-center bg-no-repeat md:hidden"
+          style={{ backgroundImage: "url('/berber-bg-mobile.png')" }}
+        />
+        <div
+          className="pointer-events-none fixed inset-0 hidden bg-cover bg-center bg-no-repeat md:block"
+          style={{ backgroundImage: "url('/berber-bg-desktop.png')" }}
+        />
+        <div className="pointer-events-none fixed inset-0 bg-black/65" />
+
         <div className="pointer-events-none fixed inset-0">
           <div className="absolute -left-40 top-[20%] h-[500px] w-[500px] rounded-full bg-[#c9a35b]/[0.04] blur-[130px]" />
           <div className="absolute -right-40 top-[50%] h-[500px] w-[500px] rounded-full bg-[#c9a35b]/[0.04] blur-[130px]" />
@@ -1444,8 +1479,17 @@ export default function Home() {
   return (
     <main
       id="anasayfa"
-      className="min-h-screen bg-[linear-gradient(rgba(8,8,8,0.45),rgba(8,8,8,0.60)),url('/berber-bg.png')] bg-cover bg-center bg-fixed text-white"
+      className="relative min-h-screen bg-[#080808] text-white"
     >
+      <div
+        className="pointer-events-none fixed inset-0 z-0 bg-cover bg-center bg-no-repeat md:hidden"
+        style={{ backgroundImage: "url('/berber-bg-mobile.png')" }}
+      />
+      <div
+        className="pointer-events-none fixed inset-0 z-0 hidden bg-cover bg-center bg-no-repeat md:block"
+        style={{ backgroundImage: "url('/berber-bg-desktop.png')" }}
+      />
+      <div className="pointer-events-none fixed inset-0 z-0 bg-black/25" />
       {/* ÜST MENÜ */}
       <header className="fixed left-0 right-0 top-0 z-50 border-b border-white/[0.07] bg-[#080808]/80 backdrop-blur-xl">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-5 py-4">
@@ -1506,20 +1550,8 @@ export default function Home() {
           HERO
       ====================================================== */}
 
-      <section className="relative flex min-h-screen items-center overflow-hidden px-5 pt-24">
-        <div
-          className="absolute inset-0 scale-[1.02] bg-cover bg-center bg-no-repeat"
-          style={{
-            backgroundImage: "url('/berber-bg.png')",
-          }}
-        />
-
-        <div className="absolute inset-0 bg-black/15" />
-
-        <div className="absolute inset-0 bg-gradient-to-r from-black/55 via-black/15 to-transparent" />
-
-        <div className="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-[#080808]" />
-
+      <section className="relative z-10 flex min-h-screen items-center overflow-hidden px-5 pt-24">
+        
         <div className="pointer-events-none absolute inset-0">
           <div className="absolute left-[20%] top-[-350px] h-[800px] w-[800px] rounded-full bg-[#c9a35b]/[0.07] blur-[180px]" />
         </div>
@@ -1566,37 +1598,48 @@ export default function Home() {
               </button>
             </div>
 
-            <div className="mt-12 flex flex-wrap gap-x-8 gap-y-5 border-t border-white/25 pt-7">
-              <div>
-                <p className="text-xs tracking-wider text-white/50">
-                  RANDEVU
+            <div className="mt-12 grid max-w-3xl gap-3 border-t border-white/25 pt-7 sm:grid-cols-3">
+              <a
+                href={phoneHref}
+                className="group rounded-2xl border border-white/15 bg-black/25 p-4 backdrop-blur-sm transition hover:-translate-y-0.5 hover:border-[#c9a35b]/60 hover:bg-black/40"
+              >
+                <p className="text-[11px] font-semibold tracking-[0.18em] text-white/50">
+                  TEK DOKUNUŞLA
                 </p>
-
-                <p className="mt-2 text-sm">
-                  Online & Kolay
+                <p className="mt-2 text-sm font-semibold text-white transition group-hover:text-[#c9a35b]">
+                  ☎ Ara
                 </p>
-              </div>
-
-              <div>
-                <p className="text-xs tracking-wider text-white/50">
-                  TELEFON
-                </p>
-
-                <a
-                  href={phoneHref}
-                  className="mt-2 block text-sm transition hover:text-[#c9a35b]"
-                >
+                <p className="mt-1 text-xs text-white/55">
                   {phone}
-                </a>
-              </div>
+                </p>
+              </a>
 
-              <div>
-                <p className="text-xs tracking-wider text-white/50">
+              <a
+                href={instagramHref}
+                target="_blank"
+                rel="noreferrer"
+                className="group rounded-2xl border border-white/15 bg-black/25 p-4 backdrop-blur-sm transition hover:-translate-y-0.5 hover:border-[#c9a35b]/60 hover:bg-black/40"
+              >
+                <p className="text-[11px] font-semibold tracking-[0.18em] text-white/50">
                   INSTAGRAM
                 </p>
-
-                <p className="mt-2 text-sm">
+                <p className="mt-2 text-sm font-semibold text-white transition group-hover:text-[#c9a35b]">
                   {instagram}
+                </p>
+                <p className="mt-1 text-xs text-white/55">
+                  Profili aç →
+                </p>
+              </a>
+
+              <div className="rounded-2xl border border-white/15 bg-black/25 p-4 backdrop-blur-sm">
+                <p className="text-[11px] font-semibold tracking-[0.18em] text-white/50">
+                  BUGÜNKÜ SAAT
+                </p>
+                <p className="mt-2 text-sm font-semibold text-[#c9a35b]">
+                  {todayWorkingHour}
+                </p>
+                <p className="mt-1 text-xs text-white/55">
+                  Yönetim panelindeki çalışma saatine göre
                 </p>
               </div>
             </div>
@@ -1604,7 +1647,7 @@ export default function Home() {
 
           {/* SAĞ KART */}
           <div className="relative hidden lg:block">
-            <div className="relative mx-auto h-[470px] max-w-[380px] overflow-hidden rounded-[40px] border border-white/25 bg-black/15 p-8 shadow-2xl backdrop-blur-[3px]">
+            <div className="relative mx-auto h-[560px] max-w-[380px] overflow-hidden rounded-[40px] border border-white/25 bg-black/15 p-8 shadow-2xl backdrop-blur-[3px]">
               <div className="pointer-events-none absolute -right-20 -top-20 h-60 w-60 rounded-full bg-[#c9a35b]/10 blur-[80px]" />
 
               <div className="relative z-10 flex h-full flex-col justify-between">
@@ -1630,9 +1673,38 @@ export default function Home() {
                     </span>
                   </p>
 
+                  <div className="mt-7 space-y-3">
+                    <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-black/20 px-4 py-3">
+                      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-[#c9a35b]/45 text-xs font-bold text-[#c9a35b]">
+                        1
+                      </span>
+                      <span className="text-sm text-white/80">
+                        Hizmetini seç
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-black/20 px-4 py-3">
+                      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-[#c9a35b]/45 text-xs font-bold text-[#c9a35b]">
+                        2
+                      </span>
+                      <span className="text-sm text-white/80">
+                        Gün &amp; saat seç
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-3 rounded-xl border border-white/10 bg-black/20 px-4 py-3">
+                      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-[#c9a35b]/45 text-xs font-bold text-[#c9a35b]">
+                        3
+                      </span>
+                      <span className="text-sm text-white/80">
+                        Randevunu oluştur
+                      </span>
+                    </div>
+                  </div>
+
                   <button
                     onClick={goAppointment}
-                    className="mt-8 w-full rounded-xl border border-[#c9a35b]/60 bg-black/15 py-4 font-semibold text-[#c9a35b] backdrop-blur-sm transition hover:bg-[#c9a35b] hover:text-black"
+                    className="mt-6 w-full rounded-xl border border-[#c9a35b]/60 bg-black/15 py-4 font-semibold text-[#c9a35b] backdrop-blur-sm transition hover:bg-[#c9a35b] hover:text-black"
                   >
                     Randevu Oluştur →
                   </button>
@@ -1649,9 +1721,11 @@ export default function Home() {
 
       <section
         id="hizmetler"
-        className="scroll-mt-24 border-y border-white/[0.07] bg-[linear-gradient(rgba(8,8,8,0.45),rgba(8,8,8,0.45)),url('/berber-bg.png')] bg-cover bg-center bg-fixed"
+        className="relative z-10 scroll-mt-24 overflow-hidden border-y border-white/[0.07] bg-transparent"
       >
-        <div className="mx-auto max-w-6xl px-5 py-24">
+        
+
+        <div className="relative z-10 mx-auto max-w-6xl px-5 py-24">
           <div className="text-center">
             <p className="text-xs font-semibold tracking-[0.35em] text-[#c9a35b]">
               HİZMETLER & FİYATLAR
@@ -1740,8 +1814,10 @@ export default function Home() {
 
       <section
         id="iletisim"
-        className="scroll-mt-24 bg-[linear-gradient(rgba(8,8,8,0.60),rgba(8,8,8,0.60)),url('/berber-bg.png')] bg-cover bg-center bg-fixed"
+        className="z-10 relative overflow-hidden scroll-mt-24 bg-transparent"
       >
+
+
         <div className="mx-auto max-w-6xl px-5 py-24">
           <div className="grid gap-12 lg:grid-cols-2">
             <div>
