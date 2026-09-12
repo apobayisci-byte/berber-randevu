@@ -607,28 +607,41 @@ export async function POST(request: Request) {
 
     const primaryService = services[0];
 
-    const { data: appointment, error: insertError } =
-      await supabaseAdmin
-        .from("appointments")
-        .insert({
-          service_id: primaryService.id,
-          price_at_booking: totalPrice,
-          total_price: totalPrice,
-          total_duration_minutes: totalDuration,
-          customer_name: customerName,
-          customer_phone: customerPhone,
-          customer_note: customerNote,
-          appointment_date: appointmentDate,
-          appointment_time: appointmentTime,
-          status: "approved",
-        })
-        .select("id")
-        .single();
+    const appointmentServices = services.map((service) => ({
+      service_id: service.id,
+      service_name: service.name,
+      price_at_booking: Number(service.price ?? 0),
+      duration_minutes: service.duration_minutes,
+    }));
 
-    if (insertError) {
-      console.error("Randevu oluşturulamadı:", insertError);
+    // Son çakışma kontrolü + ana randevu + seçilen hizmetler tek DB
+    // transaction'ında oluşturulur. Böylece aynı anda gelen çakışan
+    // rezervasyonlardan yalnızca biri başarılı olabilir.
+    const { data: appointmentIdData, error: atomicError } =
+      await supabaseAdmin.rpc("create_appointment_atomic", {
+        p_service_id: primaryService.id,
+        p_customer_name: customerName,
+        p_customer_phone: customerPhone,
+        p_customer_note: customerNote,
+        p_appointment_date: appointmentDate,
+        p_appointment_time: appointmentTime,
+        p_total_price: totalPrice,
+        p_total_duration_minutes: totalDuration,
+        p_fallback_duration: appointmentInterval,
+        p_services: appointmentServices,
+      });
 
-      if (insertError.code === "23505") {
+    if (atomicError) {
+      console.error("Atomik randevu oluşturulamadı:", atomicError);
+
+      const errorText = `${atomicError.message ?? ""} ${
+        atomicError.details ?? ""
+      } ${atomicError.hint ?? ""}`;
+
+      if (
+        errorText.includes("SLOT_TAKEN") ||
+        atomicError.code === "23505"
+      ) {
         return NextResponse.json(
           {
             error: "Bu saat az önce başka bir müşteri tarafından alındı.",
@@ -647,33 +660,18 @@ export async function POST(request: Request) {
       );
     }
 
-    const appointmentServices = services.map((service) => ({
-      appointment_id: appointment.id,
-      service_id: service.id,
-      service_name: service.name,
-      price_at_booking: Number(service.price ?? 0),
-      duration_minutes: service.duration_minutes,
-    }));
+    const appointmentId = Number(appointmentIdData);
 
-    const { error: serviceInsertError } = await supabaseAdmin
-      .from("appointment_services")
-      .insert(appointmentServices);
-
-    if (serviceInsertError) {
+    if (!Number.isInteger(appointmentId) || appointmentId <= 0) {
       console.error(
-        "Randevu hizmetleri kaydedilemedi:",
-        serviceInsertError
+        "Atomik randevu fonksiyonu geçersiz ID döndürdü:",
+        appointmentIdData
       );
-
-      await supabaseAdmin
-        .from("appointments")
-        .delete()
-        .eq("id", appointment.id);
 
       return NextResponse.json(
         {
           error:
-            "Randevu hizmetleri kaydedilemedi. Lütfen tekrar deneyin.",
+            "Randevu şu anda oluşturulamadı. Lütfen tekrar deneyin.",
         },
         { status: 500 }
       );
@@ -689,7 +687,7 @@ export async function POST(request: Request) {
     return NextResponse.json(
       {
         success: true,
-        appointment_id: appointment.id,
+        appointment_id: appointmentId,
         status: "approved",
       },
       { status: 201 }

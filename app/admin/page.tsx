@@ -15,6 +15,11 @@ type Appointment = {
   is_archived: boolean;
   archived_at: string | null;
   services: { name: string; price: number | null } | null;
+  appointment_services: {
+    service_name: string;
+    price_at_booking: number | null;
+    duration_minutes: number;
+  }[];
 };
 
 type Service = {
@@ -150,7 +155,12 @@ export default function AdminPage() {
         price_at_booking,
         is_archived,
         archived_at,
-        services (name, price)
+        services (name, price),
+        appointment_services (
+          service_name,
+          price_at_booking,
+          duration_minutes
+        )
       `)
       .order("appointment_date", { ascending: true })
       .order("appointment_time", { ascending: true });
@@ -1041,7 +1051,7 @@ export default function AdminPage() {
               <Info label="Telefon" value={selectedAppointment.customer_phone} />
               <Info
                 label="Hizmet"
-                value={selectedAppointment.services?.name ?? "-"}
+                value={getAppointmentServicesText(selectedAppointment)}
               />
               <Info
                 label="Tarih"
@@ -1471,7 +1481,7 @@ export default function AdminPage() {
                       <WhatsAppPhone appointment={appointment} />
                       <Info
                         label="Hizmet"
-                        value={appointment.services?.name ?? "-"}
+                        value={getAppointmentServicesText(appointment)}
                       />
                       <Info
                         label="Tarih / Saat"
@@ -2011,6 +2021,16 @@ export default function AdminPage() {
 const inputClass =
   "mt-2 w-full rounded-xl border border-white/10 bg-[#171717] px-4 py-3 text-white outline-none transition focus:border-[#c9a35b]/60 disabled:cursor-not-allowed disabled:opacity-35";
 
+function getAppointmentServicesText(appointment: Appointment) {
+  const childServices = appointment.appointment_services ?? [];
+
+  if (childServices.length > 0) {
+    return childServices.map((item) => item.service_name).join(" + ");
+  }
+
+  return appointment.services?.name ?? "-";
+}
+
 function TimetableAppointment({
   appointment,
   onClick,
@@ -2018,7 +2038,7 @@ function TimetableAppointment({
   appointment: Appointment;
   onClick: () => void;
 }) {
-  const service = appointment.services?.name ?? "-";
+  const service = getAppointmentServicesText(appointment);
   const cancelled = appointment.status === "cancelled";
 
   return (
@@ -2090,7 +2110,7 @@ function AppointmentCard({
           <WhatsAppPhone appointment={appointment} />
           <Info
             label="Hizmet"
-            value={appointment.services?.name ?? "-"}
+            value={getAppointmentServicesText(appointment)}
           />
           <Info
             label="Tarih / Saat"

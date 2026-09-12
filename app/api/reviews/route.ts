@@ -30,22 +30,26 @@ export async function GET() {
 
     const { data, error } = await supabase
       .from("reviews")
-      .select("id, customer_name, customer_phone, rating, comment, created_at")
+      .select("id, customer_name, rating, comment, created_at")
       .eq("is_active", true)
       .order("created_at", { ascending: false })
       .limit(10);
 
     if (error) {
       console.error("Yorumlar alınamadı:", error);
+
       return NextResponse.json(
         { error: "Yorumlar alınamadı." },
         { status: 500 }
       );
     }
 
-    return NextResponse.json({ reviews: data ?? [] });
+    return NextResponse.json({
+      reviews: data ?? [],
+    });
   } catch (error) {
     console.error("Reviews GET hatası:", error);
+
     return NextResponse.json(
       { error: "Yorumlar alınamadı." },
       { status: 500 }
@@ -91,11 +95,12 @@ export async function POST(request: Request) {
       );
     }
 
-    const { data: appointment, error: appointmentError } = await supabase
-      .from("appointments")
-      .select("id, customer_name, customer_phone, status")
-      .eq("id", appointmentId)
-      .maybeSingle();
+    const { data: appointment, error: appointmentError } =
+      await supabase
+        .from("appointments")
+        .select("id, customer_name, customer_phone, status")
+        .eq("id", appointmentId)
+        .maybeSingle();
 
     if (appointmentError || !appointment) {
       return NextResponse.json(
@@ -131,7 +136,7 @@ export async function POST(request: Request) {
         comment,
         is_active: true,
       })
-      .select("id, customer_name, customer_phone, rating, comment, created_at")
+      .select("id, customer_name, rating, comment, created_at")
       .single();
 
     if (error) {
@@ -151,11 +156,15 @@ export async function POST(request: Request) {
     }
 
     return NextResponse.json(
-      { success: true, review },
+      {
+        success: true,
+        review,
+      },
       { status: 201 }
     );
   } catch (error) {
     console.error("Reviews POST hatası:", error);
+
     return NextResponse.json(
       { error: "Yorum şu anda kaydedilemedi." },
       { status: 500 }
