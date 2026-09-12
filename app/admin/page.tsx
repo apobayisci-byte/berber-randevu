@@ -978,12 +978,16 @@ export default function AdminPage() {
       )
   ).length;
 
-  const calendarMonday = new Date(monday);
-  calendarMonday.setDate(calendarMonday.getDate() + weekOffset * 7);
+  // Takvim haftanın Pazartesi gününe sabitlenmez.
+  // Her zaman bugün + önümüzdeki 6 günü gösterir.
+  // İleri/geri kontrolleri 7 günlük bloklar halinde çalışmaya devam eder.
+  const calendarStart = new Date(today);
+  calendarStart.setHours(0, 0, 0, 0);
+  calendarStart.setDate(calendarStart.getDate() + weekOffset * 7);
 
   const calendarDays = Array.from({ length: 7 }, (_, index) => {
-    const date = new Date(calendarMonday);
-    date.setDate(calendarMonday.getDate() + index);
+    const date = new Date(calendarStart);
+    date.setDate(calendarStart.getDate() + index);
 
     const key = localDateKey(date);
     const dayAppointments = appointments
@@ -1002,11 +1006,11 @@ export default function AdminPage() {
     };
   });
 
-  const calendarSunday = calendarDays[6].date;
-  const calendarRangeLabel = `${calendarMonday.toLocaleDateString("tr-TR", {
+  const calendarEnd = calendarDays[6].date;
+  const calendarRangeLabel = `${calendarStart.toLocaleDateString("tr-TR", {
     day: "2-digit",
     month: "short",
-  })} – ${calendarSunday.toLocaleDateString("tr-TR", {
+  })} – ${calendarEnd.toLocaleDateString("tr-TR", {
     day: "2-digit",
     month: "short",
     year: "numeric",
@@ -1260,7 +1264,7 @@ export default function AdminPage() {
                 </p>
                 <h1 className="mt-1.5 text-2xl font-bold sm:mt-2 sm:text-3xl">Randevu Yönetimi</h1>
                 <p className="mt-1.5 text-xs text-white/40 sm:mt-2 sm:text-sm">
-                  Pazartesi–Pazar randevularını tek ekranda görüntüle.
+                  Bugünden başlayarak önündeki 7 günlük randevuları tek ekranda görüntüle.
                 </p>
               </div>
 
