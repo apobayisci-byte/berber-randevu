@@ -62,6 +62,11 @@ export default function AdminPage() {
   const [notice, setNotice] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [updatingId, setUpdatingId] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
+  const [newAppointmentNotice, setNewAppointmentNotice] = useState<{
+    name: string;
+    date: string;
+    time: string;
+  } | null>(null);
 
   const showNotice = (type: "success" | "error", text: string) => {
     setNotice({ type, text });
@@ -134,6 +139,50 @@ export default function AdminPage() {
     checkSession();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (!loggedIn) return;
+
+    const channel = supabase
+      .channel("admin-new-appointments")
+      .on(
+        "postgres_changes",
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "appointments",
+        },
+        async (payload) => {
+          const row = payload.new as {
+            customer_name?: string;
+            appointment_date?: string;
+            appointment_time?: string;
+          };
+
+          setNewAppointmentNotice({
+            name: row.customer_name || "Yeni müşteri",
+            date: row.appointment_date || "",
+            time: row.appointment_time?.slice(0, 5) || "",
+          });
+
+          try {
+            await loadAppointments();
+          } catch (err) {
+            console.error("Yeni randevu sonrası liste yenilenemedi:", err);
+          }
+
+          window.setTimeout(() => {
+            setNewAppointmentNotice(null);
+          }, 7000);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loggedIn]);
 
   const login = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -366,6 +415,43 @@ export default function AdminPage() {
 
   return (
     <main className="min-h-screen bg-[#080808] text-white">
+      {newAppointmentNotice && (
+        <div className="fixed right-5 top-5 z-[110] w-[calc(100%-2.5rem)] max-w-sm">
+          <button
+            type="button"
+            onClick={() => {
+              setActiveTab("appointments");
+              setNewAppointmentNotice(null);
+              window.scrollTo({ top: 0, behavior: "smooth" });
+            }}
+            className="w-full rounded-2xl border border-[#c9a35b]/45 bg-[#111111]/95 p-5 text-left shadow-2xl backdrop-blur-xl transition hover:border-[#c9a35b]/75"
+          >
+            <div className="flex items-start gap-4">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-[#c9a35b]/35 bg-[#c9a35b]/10 text-xl">
+                🔔
+              </div>
+              <div className="min-w-0">
+                <p className="font-bold text-[#c9a35b]">
+                  Yeni randevu geldi
+                </p>
+                <p className="mt-1 truncate text-sm font-semibold text-white">
+                  {newAppointmentNotice.name}
+                </p>
+                <p className="mt-1 text-xs text-white/50">
+                  {newAppointmentNotice.date}
+                  {newAppointmentNotice.time
+                    ? ` • ${newAppointmentNotice.time}`
+                    : ""}
+                </p>
+                <p className="mt-3 text-[11px] text-white/35">
+                  Randevuyu görüntülemek için tıkla
+                </p>
+              </div>
+            </div>
+          </button>
+        </div>
+      )}
+
       {notice && (
         <div className="fixed left-1/2 top-5 z-[100] w-[calc(100%-2rem)] max-w-md -translate-x-1/2">
           <div className={`rounded-2xl border px-5 py-4 text-sm font-semibold shadow-2xl backdrop-blur-xl ${notice.type === "success" ? "border-emerald-500/30 bg-emerald-950/95 text-emerald-200" : "border-red-500/30 bg-red-950/95 text-red-200"}`}>
