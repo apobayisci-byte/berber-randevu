@@ -330,7 +330,7 @@ export async function POST(request: Request) {
       error: serviceError,
     } = await supabaseAdmin
       .from("services")
-      .select("id, name, is_active")
+      .select("id, name, price, is_active")
       .eq("id", serviceId)
       .eq("is_active", true)
       .maybeSingle();
@@ -506,6 +506,7 @@ export async function POST(request: Request) {
       .from("appointments")
       .insert({
         service_id: serviceId,
+        price_at_booking: service.price,
         customer_name: customerName,
         customer_phone: customerPhone,
         customer_note: customerNote,

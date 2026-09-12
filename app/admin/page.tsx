@@ -11,6 +11,9 @@ type Appointment = {
   appointment_date: string;
   appointment_time: string;
   status: string;
+  price_at_booking: number | null;
+  is_archived: boolean;
+  archived_at: string | null;
   services: { name: string; price: number | null } | null;
 };
 
@@ -41,7 +44,21 @@ type BusinessSettings = {
   appointment_interval: number;
 };
 
-type Tab = "appointments" | "services" | "hours" | "business";
+type ActivityLog = {
+  id: number;
+  appointment_id: number | null;
+  action_type: string;
+  description: string;
+  created_at: string;
+};
+
+type Tab =
+  | "appointments"
+  | "history"
+  | "logs"
+  | "services"
+  | "hours"
+  | "business";
 
 export default function AdminPage() {
   const supabase = createClient();
@@ -55,13 +72,18 @@ export default function AdminPage() {
   const [activeTab, setActiveTab] = useState<Tab>("appointments");
 
   const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [activityLogs, setActivityLogs] = useState<ActivityLog[]>([]);
   const [services, setServices] = useState<Service[]>([]);
   const [workingHours, setWorkingHours] = useState<WorkingHour[]>([]);
   const [business, setBusiness] = useState<BusinessSettings | null>(null);
 
-  const [notice, setNotice] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [notice, setNotice] = useState<{
+    type: "success" | "error";
+    text: string;
+  } | null>(null);
   const [updatingId, setUpdatingId] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
+  const [archiving, setArchiving] = useState(false);
   const [pushEnabled, setPushEnabled] = useState(false);
   const [pushLoading, setPushLoading] = useState(false);
   const [newAppointmentNotice, setNewAppointmentNotice] = useState<{
@@ -75,6 +97,26 @@ export default function AdminPage() {
     window.setTimeout(() => setNotice(null), 3000);
   };
 
+  const localDateKey = (date: Date) => {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, "0");
+    const day = String(date.getDate()).padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  };
+
+  const formatDate = (date: string) => {
+    if (!date) return "-";
+    const [year, month, day] = date.split("-");
+    return `${day}.${month}.${year}`;
+  };
+
+  const formatLogDate = (value: string) => {
+    return new Intl.DateTimeFormat("tr-TR", {
+      dateStyle: "medium",
+      timeStyle: "short",
+    }).format(new Date(value));
+  };
+
   const loadAppointments = async () => {
     const { data, error } = await supabase
       .from("appointments")
@@ -86,6 +128,9 @@ export default function AdminPage() {
         appointment_date,
         appointment_time,
         status,
+        price_at_booking,
+        is_archived,
+        archived_at,
         services (name, price)
       `)
       .order("appointment_date", { ascending: true })
@@ -95,11 +140,32 @@ export default function AdminPage() {
     setAppointments((data ?? []) as unknown as Appointment[]);
   };
 
+  const loadActivityLogs = async () => {
+    const { data, error } = await supabase
+      .from("admin_activity_logs")
+      .select("id,appointment_id,action_type,description,created_at")
+      .order("created_at", { ascending: false })
+      .limit(500);
+
+    if (error) throw error;
+    setActivityLogs((data ?? []) as ActivityLog[]);
+  };
+
   const loadSettings = async () => {
     const [servicesResult, hoursResult, businessResult] = await Promise.all([
-      supabase.from("services").select("id,name,price,duration_minutes,is_active,sort_order").order("sort_order", { ascending: true }),
-      supabase.from("working_hours").select("id,day_of_week,day_name,is_open,open_time,close_time").order("day_of_week", { ascending: true }),
-      supabase.from("business_settings").select("id,barber_name,phone,instagram,address,appointment_interval").limit(1).single(),
+      supabase
+        .from("services")
+        .select("id,name,price,duration_minutes,is_active,sort_order")
+        .order("sort_order", { ascending: true }),
+      supabase
+        .from("working_hours")
+        .select("id,day_of_week,day_name,is_open,open_time,close_time")
+        .order("day_of_week", { ascending: true }),
+      supabase
+        .from("business_settings")
+        .select("id,barber_name,phone,instagram,address,appointment_interval")
+        .limit(1)
+        .single(),
     ]);
 
     if (servicesResult.error) throw servicesResult.error;
@@ -114,8 +180,13 @@ export default function AdminPage() {
   const loadAll = async () => {
     setLoading(true);
     setError("");
+
     try {
-      await Promise.all([loadAppointments(), loadSettings()]);
+      await Promise.all([
+        loadAppointments(),
+        loadActivityLogs(),
+        loadSettings(),
+      ]);
     } catch (err) {
       console.error(err);
       setError("Panel verileri yüklenemedi.");
@@ -126,9 +197,14 @@ export default function AdminPage() {
 
   useEffect(() => {
     const checkSession = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
       if (session) {
-        const { data: isAdmin, error: adminError } = await supabase.rpc("is_admin");
+        const { data: isAdmin, error: adminError } =
+          await supabase.rpc("is_admin");
+
         if (!adminError && isAdmin === true) {
           setLoggedIn(true);
           await loadAll();
@@ -136,8 +212,10 @@ export default function AdminPage() {
           await supabase.auth.signOut();
         }
       }
+
       setChecking(false);
     };
+
     checkSession();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -191,10 +269,11 @@ export default function AdminPage() {
     setLoading(true);
     setError("");
 
-    const { error: loginError } = await supabase.auth.signInWithPassword({
-      email: email.trim(),
-      password,
-    });
+    const { error: loginError } =
+      await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password,
+      });
 
     if (loginError) {
       setError("E-posta veya şifre hatalı.");
@@ -202,7 +281,9 @@ export default function AdminPage() {
       return;
     }
 
-    const { data: isAdmin, error: adminError } = await supabase.rpc("is_admin");
+    const { data: isAdmin, error: adminError } =
+      await supabase.rpc("is_admin");
+
     if (adminError || isAdmin !== true) {
       await supabase.auth.signOut();
       setError("Bu hesabın yönetim paneline erişim yetkisi yok.");
@@ -222,7 +303,9 @@ export default function AdminPage() {
       .replace(/_/g, "/");
 
     const rawData = window.atob(base64);
-    return Uint8Array.from([...rawData].map((char) => char.charCodeAt(0)));
+    return Uint8Array.from(
+      [...rawData].map((char) => char.charCodeAt(0))
+    );
   };
 
   const enablePushNotifications = async () => {
@@ -238,6 +321,7 @@ export default function AdminPage() {
     }
 
     const publicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
+
     if (!publicKey) {
       showNotice("error", "Push bildirim anahtarı bulunamadı.");
       return;
@@ -254,10 +338,12 @@ export default function AdminPage() {
         return;
       }
 
-      const registration = await navigator.serviceWorker.register("/sw.js");
+      const registration =
+        await navigator.serviceWorker.register("/sw.js");
       await navigator.serviceWorker.ready;
 
-      let subscription = await registration.pushManager.getSubscription();
+      let subscription =
+        await registration.pushManager.getSubscription();
 
       if (!subscription) {
         subscription = await registration.pushManager.subscribe({
@@ -311,6 +397,7 @@ export default function AdminPage() {
 
   useEffect(() => {
     if (!loggedIn) return;
+
     if (
       !("serviceWorker" in navigator) ||
       !("PushManager" in window) ||
@@ -321,10 +408,14 @@ export default function AdminPage() {
 
     const checkPush = async () => {
       try {
-        const registration = await navigator.serviceWorker.register("/sw.js");
-        const subscription = await registration.pushManager.getSubscription();
+        const registration =
+          await navigator.serviceWorker.register("/sw.js");
+        const subscription =
+          await registration.pushManager.getSubscription();
+
         setPushEnabled(
-          Notification.permission === "granted" && subscription !== null
+          Notification.permission === "granted" &&
+            subscription !== null
         );
       } catch (err) {
         console.error("Push durumu kontrol edilemedi:", err);
@@ -338,13 +429,48 @@ export default function AdminPage() {
     await supabase.auth.signOut();
     setLoggedIn(false);
     setAppointments([]);
+    setActivityLogs([]);
     setServices([]);
     setWorkingHours([]);
     setBusiness(null);
   };
 
+  const addActivityLog = async (
+    appointmentId: number | null,
+    actionType: string,
+    description: string
+  ) => {
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser();
+
+    if (userError || !user) {
+      throw userError ?? new Error("Admin oturumu bulunamadı.");
+    }
+
+    const { error: logError } = await supabase
+      .from("admin_activity_logs")
+      .insert({
+        admin_user_id: user.id,
+        appointment_id: appointmentId,
+        action_type: actionType,
+        description,
+      });
+
+    if (logError) throw logError;
+  };
+
   const updateStatus = async (id: number, status: string) => {
     if (updatingId !== null) return;
+
+    const target = appointments.find((item) => item.id === id);
+
+    if (!target) {
+      showNotice("error", "Randevu bulunamadı.");
+      return;
+    }
+
     setUpdatingId(id);
 
     const { data, error } = await supabase
@@ -362,8 +488,45 @@ export default function AdminPage() {
     }
 
     setAppointments((current) =>
-      current.map((item) => item.id === id ? { ...item, status: data.status } : item)
+      current.map((item) =>
+        item.id === id ? { ...item, status: data.status } : item
+      )
     );
+
+    const actionLabels: Record<string, string> = {
+      approved: "onaylandı",
+      completed: "tamamlandı",
+      rejected: "reddedildi",
+      cancelled: "iptal edildi",
+    };
+
+    const actionTypeLabels: Record<string, string> = {
+      approved: "appointment_approved",
+      completed: "appointment_completed",
+      rejected: "appointment_rejected",
+      cancelled: "appointment_cancelled",
+    };
+
+    try {
+      await addActivityLog(
+        id,
+        actionTypeLabels[status] ?? "appointment_updated",
+        `${target.customer_name} adlı müşterinin ${formatDate(
+          target.appointment_date
+        )} ${target.appointment_time.slice(0, 5)} randevusu ${
+          actionLabels[status] ?? "güncellendi"
+        }.`
+      );
+      await loadActivityLogs();
+    } catch (logError) {
+      console.error("İşlem logu kaydedilemedi:", logError);
+      showNotice(
+        "error",
+        "Randevu güncellendi fakat işlem geçmişi kaydedilemedi."
+      );
+      setUpdatingId(null);
+      return;
+    }
 
     const messages: Record<string, string> = {
       approved: "Randevu başarıyla onaylandı.",
@@ -371,12 +534,84 @@ export default function AdminPage() {
       rejected: "Randevu reddedildi.",
       cancelled: "Randevu iptal edildi.",
     };
-    showNotice("success", messages[status] ?? "Randevu güncellendi.");
+
+    showNotice(
+      "success",
+      messages[status] ?? "Randevu güncellendi."
+    );
     setUpdatingId(null);
+  };
+
+  const archiveDay = async () => {
+    if (archiving) return;
+
+    const todayKey = localDateKey(new Date());
+
+    const archivable = appointments.filter(
+      (appointment) =>
+        !appointment.is_archived &&
+        appointment.appointment_date <= todayKey &&
+        ["completed", "rejected", "cancelled"].includes(
+          appointment.status
+        )
+    );
+
+    if (archivable.length === 0) {
+      showNotice(
+        "error",
+        "Arşivlenecek tamamlanmış, reddedilmiş veya iptal edilmiş randevu yok."
+      );
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `${archivable.length} randevu arşive taşınacak. Kayıtlar silinmeyecek. Devam edilsin mi?`
+    );
+
+    if (!confirmed) return;
+
+    setArchiving(true);
+
+    const ids = archivable.map((appointment) => appointment.id);
+    const archivedAt = new Date().toISOString();
+
+    const { error: archiveError } = await supabase
+      .from("appointments")
+      .update({
+        is_archived: true,
+        archived_at: archivedAt,
+      })
+      .in("id", ids);
+
+    if (archiveError) {
+      console.error(archiveError);
+      showNotice("error", "Randevular arşivlenemedi.");
+      setArchiving(false);
+      return;
+    }
+
+    try {
+      await addActivityLog(
+        null,
+        "day_archived",
+        `${formatDate(todayKey)} tarihinde ${archivable.length} randevu arşive taşındı.`
+      );
+    } catch (logError) {
+      console.error("Arşiv logu kaydedilemedi:", logError);
+    }
+
+    await Promise.all([loadAppointments(), loadActivityLogs()]);
+    setActiveTab("history");
+    showNotice(
+      "success",
+      `${archivable.length} randevu geçmişe taşındı.`
+    );
+    setArchiving(false);
   };
 
   const saveService = async (service: Service) => {
     setSaving(true);
+
     const { error } = await supabase
       .from("services")
       .update({
@@ -388,17 +623,23 @@ export default function AdminPage() {
       .eq("id", service.id);
 
     setSaving(false);
+
     if (error) {
       console.error(error);
       showNotice("error", "Hizmet kaydedilemedi.");
       return;
     }
+
     showNotice("success", `${service.name} kaydedildi.`);
   };
 
   const addService = async () => {
     setSaving(true);
-    const nextSort = services.length ? Math.max(...services.map((s) => s.sort_order ?? 0)) + 1 : 1;
+
+    const nextSort = services.length
+      ? Math.max(...services.map((s) => s.sort_order ?? 0)) + 1
+      : 1;
+
     const { data, error } = await supabase
       .from("services")
       .insert({
@@ -412,17 +653,23 @@ export default function AdminPage() {
       .single();
 
     setSaving(false);
+
     if (error || !data) {
       console.error(error);
       showNotice("error", "Yeni hizmet eklenemedi.");
       return;
     }
+
     setServices((current) => [...current, data as Service]);
-    showNotice("success", "Yeni hizmet eklendi. Adını ve fiyatını düzenleyebilirsin.");
+    showNotice(
+      "success",
+      "Yeni hizmet eklendi. Adını ve fiyatını düzenleyebilirsin."
+    );
   };
 
   const saveWorkingHour = async (day: WorkingHour) => {
     setSaving(true);
+
     const { error } = await supabase
       .from("working_hours")
       .update({
@@ -433,17 +680,24 @@ export default function AdminPage() {
       .eq("id", day.id);
 
     setSaving(false);
+
     if (error) {
       console.error(error);
       showNotice("error", `${day.day_name} kaydedilemedi.`);
       return;
     }
-    showNotice("success", `${day.day_name} çalışma saati kaydedildi.`);
+
+    showNotice(
+      "success",
+      `${day.day_name} çalışma saati kaydedildi.`
+    );
   };
 
   const saveBusiness = async () => {
     if (!business) return;
+
     setSaving(true);
+
     const { error } = await supabase
       .from("business_settings")
       .update({
@@ -456,48 +710,84 @@ export default function AdminPage() {
       .eq("id", business.id);
 
     setSaving(false);
+
     if (error) {
       console.error(error);
       showNotice("error", "İşletme ayarları kaydedilemedi.");
       return;
     }
-    showNotice("success", "İşletme ayarları başarıyla kaydedildi.");
+
+    showNotice(
+      "success",
+      "İşletme ayarları başarıyla kaydedildi."
+    );
   };
 
   if (checking) {
-    return <main className="flex min-h-screen items-center justify-center bg-[#080808] text-white"><p className="text-white/40">Admin paneli yükleniyor...</p></main>;
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-[#080808] text-white">
+        <p className="text-white/40">Admin paneli yükleniyor...</p>
+      </main>
+    );
   }
 
   if (!loggedIn) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-[#080808] px-5 text-white">
-        <form onSubmit={login} className="w-full max-w-md rounded-3xl border border-white/10 bg-[#101010] p-7 shadow-2xl">
+        <form
+          onSubmit={login}
+          className="w-full max-w-md rounded-3xl border border-white/10 bg-[#101010] p-7 shadow-2xl"
+        >
           <div className="text-center">
-            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full border border-[#c9a35b]/30 bg-[#c9a35b]/10 text-2xl text-[#c9a35b]">✂</div>
-            <p className="mt-6 text-xs font-semibold tracking-[0.3em] text-[#c9a35b]">MURATHAN YAZAR</p>
-            <h1 className="mt-2 text-3xl font-bold">Yönetim Paneli</h1>
+            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full border border-[#c9a35b]/30 bg-[#c9a35b]/10 text-2xl text-[#c9a35b]">
+              ✂
+            </div>
+            <p className="mt-6 text-xs font-semibold tracking-[0.3em] text-[#c9a35b]">
+              MURATHAN YAZAR
+            </p>
+            <h1 className="mt-2 text-3xl font-bold">
+              Yönetim Paneli
+            </h1>
           </div>
-          <label className="mt-8 block text-xs text-white/40">E-POSTA</label>
-          <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required className="mt-2 w-full rounded-xl border border-white/10 bg-[#171717] px-4 py-4 outline-none focus:border-[#c9a35b]/60" />
-          <label className="mt-5 block text-xs text-white/40">ŞİFRE</label>
-          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required className="mt-2 w-full rounded-xl border border-white/10 bg-[#171717] px-4 py-4 outline-none focus:border-[#c9a35b]/60" />
-          {error && <p className="mt-4 rounded-xl border border-red-500/20 bg-red-500/5 p-3 text-sm text-red-300">{error}</p>}
-          <button disabled={loading} className="mt-6 w-full rounded-xl bg-[#c9a35b] py-4 font-bold text-black transition hover:bg-[#dfbd76] disabled:opacity-50">
+
+          <label className="mt-8 block text-xs text-white/40">
+            E-POSTA
+          </label>
+          <input
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            required
+            className="mt-2 w-full rounded-xl border border-white/10 bg-[#171717] px-4 py-4 outline-none focus:border-[#c9a35b]/60"
+          />
+
+          <label className="mt-5 block text-xs text-white/40">
+            ŞİFRE
+          </label>
+          <input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+            className="mt-2 w-full rounded-xl border border-white/10 bg-[#171717] px-4 py-4 outline-none focus:border-[#c9a35b]/60"
+          />
+
+          {error && (
+            <p className="mt-4 rounded-xl border border-red-500/20 bg-red-500/5 p-3 text-sm text-red-300">
+              {error}
+            </p>
+          )}
+
+          <button
+            disabled={loading}
+            className="mt-6 w-full rounded-xl bg-[#c9a35b] py-4 font-bold text-black transition hover:bg-[#dfbd76] disabled:opacity-50"
+          >
             {loading ? "Giriş yapılıyor..." : "Giriş Yap"}
           </button>
         </form>
       </main>
     );
   }
-
-  const pending = appointments.filter((a) => a.status === "pending").length;
-
-  const localDateKey = (date: Date) => {
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, "0");
-    const day = String(date.getDate()).padStart(2, "0");
-    return `${year}-${month}-${day}`;
-  };
 
   const today = new Date();
   const todayKey = localDateKey(today);
@@ -515,24 +805,58 @@ export default function AdminPage() {
   const weekStartKey = localDateKey(monday);
   const weekEndKey = localDateKey(sunday);
 
-  const todayAppointments = appointments.filter(
-    (a) =>
-      a.appointment_date === todayKey &&
-      !["rejected", "cancelled"].includes(a.status)
+  const activeAppointments = appointments.filter(
+    (appointment) => !appointment.is_archived
+  );
+
+  const archivedAppointments = appointments
+    .filter((appointment) => appointment.is_archived)
+    .sort((a, b) => {
+      const dateCompare =
+        b.appointment_date.localeCompare(a.appointment_date);
+
+      if (dateCompare !== 0) return dateCompare;
+
+      return b.appointment_time.localeCompare(a.appointment_time);
+    });
+
+  const pending = activeAppointments.filter(
+    (appointment) => appointment.status === "pending"
+  ).length;
+
+  const todayAppointments = activeAppointments.filter(
+    (appointment) =>
+      appointment.appointment_date === todayKey &&
+      !["rejected", "cancelled"].includes(appointment.status)
   ).length;
 
   const weeklyCompleted = appointments.filter(
-    (a) =>
-      a.status === "completed" &&
-      a.appointment_date >= weekStartKey &&
-      a.appointment_date <= weekEndKey
+    (appointment) =>
+      appointment.status === "completed" &&
+      appointment.appointment_date >= weekStartKey &&
+      appointment.appointment_date <= weekEndKey
   );
 
   const weeklyCustomers = weeklyCompleted.length;
+
   const weeklyRevenue = weeklyCompleted.reduce(
-    (total, a) => total + Number(a.services?.price ?? 0),
+    (total, appointment) =>
+      total +
+      Number(
+        appointment.price_at_booking ??
+          appointment.services?.price ??
+          0
+      ),
     0
   );
+
+  const archivableCount = activeAppointments.filter(
+    (appointment) =>
+      appointment.appointment_date <= todayKey &&
+      ["completed", "rejected", "cancelled"].includes(
+        appointment.status
+      )
+  ).length;
 
   return (
     <main className="min-h-screen bg-[#080808] text-white">
@@ -575,8 +899,15 @@ export default function AdminPage() {
 
       {notice && (
         <div className="fixed left-1/2 top-5 z-[100] w-[calc(100%-2rem)] max-w-md -translate-x-1/2">
-          <div className={`rounded-2xl border px-5 py-4 text-sm font-semibold shadow-2xl backdrop-blur-xl ${notice.type === "success" ? "border-emerald-500/30 bg-emerald-950/95 text-emerald-200" : "border-red-500/30 bg-red-950/95 text-red-200"}`}>
-            {notice.type === "success" ? "✓ " : "⚠ "}{notice.text}
+          <div
+            className={`rounded-2xl border px-5 py-4 text-sm font-semibold shadow-2xl backdrop-blur-xl ${
+              notice.type === "success"
+                ? "border-emerald-500/30 bg-emerald-950/95 text-emerald-200"
+                : "border-red-500/30 bg-red-950/95 text-red-200"
+            }`}
+          >
+            {notice.type === "success" ? "✓ " : "⚠ "}
+            {notice.text}
           </div>
         </div>
       )}
@@ -585,8 +916,11 @@ export default function AdminPage() {
         <div className="mx-auto flex max-w-7xl items-center justify-between px-5 py-5">
           <div>
             <p className="font-bold">MURATHAN YAZAR</p>
-            <p className="text-[10px] tracking-[0.3em] text-[#c9a35b]">YÖNETİM PANELİ</p>
+            <p className="text-[10px] tracking-[0.3em] text-[#c9a35b]">
+              YÖNETİM PANELİ
+            </p>
           </div>
+
           <div className="flex items-center gap-2">
             <button
               onClick={enablePushNotifications}
@@ -603,7 +937,13 @@ export default function AdminPage() {
                 ? "🔔 Bildirimler Açık"
                 : "🔔 Bildirimleri Aç"}
             </button>
-            <button onClick={logout} className="rounded-xl border border-white/10 px-4 py-2 text-sm text-white/60 hover:text-white">Çıkış Yap</button>
+
+            <button
+              onClick={logout}
+              className="rounded-xl border border-white/10 px-4 py-2 text-sm text-white/60 hover:text-white"
+            >
+              Çıkış Yap
+            </button>
           </div>
         </div>
       </header>
@@ -623,57 +963,223 @@ export default function AdminPage() {
           <Stat
             title="Bu Haftaki Kazanç"
             value={`${weeklyRevenue.toLocaleString("tr-TR")} ₺`}
-            subtitle="Tamamlanan hizmetlerden"
+            subtitle="Randevu günündeki fiyatlarla"
           />
           <Stat
             title="Onay Bekleyen"
             value={pending}
-            subtitle="İşlem bekleyen randevular"
+            subtitle="Aktif işlem bekleyen randevular"
           />
         </div>
 
         <div className="mt-7 flex gap-2 overflow-x-auto pb-2">
-          <TabButton active={activeTab === "appointments"} onClick={() => setActiveTab("appointments")}>Randevular</TabButton>
-          <TabButton active={activeTab === "services"} onClick={() => setActiveTab("services")}>Hizmetler & Fiyatlar</TabButton>
-          <TabButton active={activeTab === "hours"} onClick={() => setActiveTab("hours")}>Çalışma Saatleri</TabButton>
-          <TabButton active={activeTab === "business"} onClick={() => setActiveTab("business")}>İşletme Ayarları</TabButton>
+          <TabButton
+            active={activeTab === "appointments"}
+            onClick={() => setActiveTab("appointments")}
+          >
+            Aktif Randevular
+          </TabButton>
+          <TabButton
+            active={activeTab === "history"}
+            onClick={() => setActiveTab("history")}
+          >
+            Geçmiş ({archivedAppointments.length})
+          </TabButton>
+          <TabButton
+            active={activeTab === "logs"}
+            onClick={() => setActiveTab("logs")}
+          >
+            İşlem Geçmişi
+          </TabButton>
+          <TabButton
+            active={activeTab === "services"}
+            onClick={() => setActiveTab("services")}
+          >
+            Hizmetler & Fiyatlar
+          </TabButton>
+          <TabButton
+            active={activeTab === "hours"}
+            onClick={() => setActiveTab("hours")}
+          >
+            Çalışma Saatleri
+          </TabButton>
+          <TabButton
+            active={activeTab === "business"}
+            onClick={() => setActiveTab("business")}
+          >
+            İşletme Ayarları
+          </TabButton>
         </div>
 
-        {error && <p className="mt-5 rounded-xl border border-red-500/20 bg-red-500/5 p-4 text-red-300">{error}</p>}
+        {error && (
+          <p className="mt-5 rounded-xl border border-red-500/20 bg-red-500/5 p-4 text-red-300">
+            {error}
+          </p>
+        )}
 
         {activeTab === "appointments" && (
           <section className="mt-6">
-            <div className="flex items-center justify-between">
-              <div><p className="text-xs tracking-[0.25em] text-[#c9a35b]">RANDEVULAR</p><h1 className="mt-2 text-3xl font-bold">Randevu Yönetimi</h1></div>
-              <button onClick={loadAll} className="rounded-xl border border-white/10 px-4 py-3 text-sm text-white/60 hover:text-white">Yenile</button>
+            <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-end">
+              <div>
+                <p className="text-xs tracking-[0.25em] text-[#c9a35b]">
+                  AKTİF RANDEVULAR
+                </p>
+                <h1 className="mt-2 text-3xl font-bold">
+                  Randevu Yönetimi
+                </h1>
+                <p className="mt-2 text-sm text-white/40">
+                  Arşivlenen kayıtlar burada görünmez. Kayıtlar hiçbir
+                  zaman silinmez.
+                </p>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={loadAll}
+                  className="rounded-xl border border-white/10 px-4 py-3 text-sm text-white/60 hover:text-white"
+                >
+                  Yenile
+                </button>
+
+                <button
+                  onClick={archiveDay}
+                  disabled={archiving || archivableCount === 0}
+                  className="rounded-xl border border-[#c9a35b]/35 bg-[#c9a35b]/10 px-4 py-3 text-sm font-bold text-[#c9a35b] transition hover:bg-[#c9a35b]/15 disabled:cursor-not-allowed disabled:opacity-35"
+                >
+                  {archiving
+                    ? "Arşivleniyor..."
+                    : `Günü Arşivle (${archivableCount})`}
+                </button>
+              </div>
             </div>
 
-            {loading ? <p className="mt-8 text-white/40">Randevular yükleniyor...</p> : appointments.length === 0 ? (
-              <div className="mt-8 rounded-2xl border border-white/10 bg-[#101010] p-8 text-center text-white/35">Henüz randevu yok.</div>
+            {loading ? (
+              <p className="mt-8 text-white/40">
+                Randevular yükleniyor...
+              </p>
+            ) : activeAppointments.length === 0 ? (
+              <div className="mt-8 rounded-2xl border border-white/10 bg-[#101010] p-8 text-center text-white/35">
+                Aktif randevu bulunmuyor.
+              </div>
             ) : (
               <div className="mt-7 grid gap-4">
-                {appointments.map((a) => (
-                  <div key={a.id} className={`rounded-2xl border p-5 transition md:p-6 ${a.status === "completed" ? "border-emerald-500/35 bg-emerald-500/[0.07]" : a.status === "rejected" ? "border-red-500/35 bg-red-500/[0.07]" : a.status === "cancelled" ? "border-white/10 bg-white/[0.025] opacity-55" : a.status === "approved" ? "border-blue-400/35 bg-blue-400/[0.06]" : "border-amber-400/30 bg-amber-400/[0.05]"}`}>
-                    <div className="flex flex-col justify-between gap-5 lg:flex-row lg:items-center">
-                      <div className="grid flex-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
-                        <Info label="Müşteri" value={a.customer_name} />
-                        <Info label="Telefon" value={a.customer_phone} />
-                        <Info label="Hizmet" value={a.services?.name ?? "-"} />
-                        <Info label="Tarih / Saat" value={`${a.appointment_date} • ${a.appointment_time.slice(0, 5)}`} />
-                      </div>
-                      <div className="flex flex-wrap gap-2">
-                        <ActionButton disabled={updatingId !== null || a.status === "approved"} onClick={() => updateStatus(a.id, "approved")} kind="gold">{updatingId === a.id ? "İşleniyor..." : "Onayla"}</ActionButton>
-                        <ActionButton disabled={updatingId !== null || a.status === "completed"} onClick={() => updateStatus(a.id, "completed")} kind="green">Tamamlandı</ActionButton>
-                        <ActionButton disabled={updatingId !== null || a.status === "rejected"} onClick={() => updateStatus(a.id, "rejected")} kind="red">Reddet</ActionButton>
-                        <ActionButton disabled={updatingId !== null || a.status === "cancelled"} onClick={() => updateStatus(a.id, "cancelled")} kind="gray">İptal</ActionButton>
-                      </div>
+                {activeAppointments.map((appointment) => (
+                  <AppointmentCard
+                    key={appointment.id}
+                    appointment={appointment}
+                    updatingId={updatingId}
+                    onUpdateStatus={updateStatus}
+                  />
+                ))}
+              </div>
+            )}
+          </section>
+        )}
+
+        {activeTab === "history" && (
+          <section className="mt-6">
+            <SectionTitle
+              eyebrow="ARŞİV"
+              title="Geçmiş Randevular"
+              description="Günü Arşivle ile geçmişe taşınan kayıtlar burada saklanır. Müşteri, hizmet, o günkü fiyat ve randevu sonucu kaybolmaz."
+            />
+
+            {archivedAppointments.length === 0 ? (
+              <div className="mt-8 rounded-2xl border border-white/10 bg-[#101010] p-8 text-center text-white/35">
+                Henüz arşivlenmiş randevu yok.
+              </div>
+            ) : (
+              <div className="mt-7 grid gap-4">
+                {archivedAppointments.map((appointment) => (
+                  <div
+                    key={appointment.id}
+                    className="rounded-2xl border border-white/10 bg-[#101010] p-5 md:p-6"
+                  >
+                    <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-5">
+                      <Info
+                        label="Müşteri"
+                        value={appointment.customer_name}
+                      />
+                      <WhatsAppPhone appointment={appointment} />
+                      <Info
+                        label="Hizmet"
+                        value={appointment.services?.name ?? "-"}
+                      />
+                      <Info
+                        label="Tarih / Saat"
+                        value={`${formatDate(
+                          appointment.appointment_date
+                        )} • ${appointment.appointment_time.slice(0, 5)}`}
+                      />
+                      <Info
+                        label="Randevu Fiyatı"
+                        value={`${Number(
+                          appointment.price_at_booking ??
+                            appointment.services?.price ??
+                            0
+                        ).toLocaleString("tr-TR")} ₺`}
+                      />
                     </div>
+
                     <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-white/10 pt-4">
-                      <span className={`rounded-full border px-3 py-1 text-[11px] font-semibold ${a.status === "completed" ? "border-emerald-500/35 bg-emerald-500/10 text-emerald-300" : a.status === "rejected" ? "border-red-500/35 bg-red-500/10 text-red-300" : a.status === "cancelled" ? "border-white/15 bg-white/5 text-white/35 line-through" : a.status === "approved" ? "border-blue-400/35 bg-blue-400/10 text-blue-300" : "border-amber-400/35 bg-amber-400/10 text-amber-300"}`}>
-                        {statusIcon(a.status)} {statusLabel(a.status)}
-                      </span>
-                      {a.customer_note && <span className={`text-xs text-white/35 ${a.status === "cancelled" ? "line-through" : ""}`}>Not: {a.customer_note}</span>}
+                      <StatusBadge status={appointment.status} />
+                      {appointment.customer_note && (
+                        <span className="text-xs text-white/35">
+                          Not: {appointment.customer_note}
+                        </span>
+                      )}
                     </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+        )}
+
+        {activeTab === "logs" && (
+          <section className="mt-6">
+            <div className="flex items-end justify-between gap-4">
+              <SectionTitle
+                eyebrow="KAYITLAR"
+                title="İşlem Geçmişi"
+                description="Admin panelinde yapılan randevu durum değişiklikleri ve arşivleme işlemleri tarih ve saatleriyle burada tutulur."
+              />
+
+              <button
+                onClick={loadActivityLogs}
+                className="shrink-0 rounded-xl border border-white/10 px-4 py-3 text-sm text-white/60 hover:text-white"
+              >
+                Yenile
+              </button>
+            </div>
+
+            {activityLogs.length === 0 ? (
+              <div className="mt-8 rounded-2xl border border-white/10 bg-[#101010] p-8 text-center text-white/35">
+                Henüz işlem kaydı yok.
+              </div>
+            ) : (
+              <div className="mt-7 overflow-hidden rounded-2xl border border-white/10 bg-[#101010]">
+                {activityLogs.map((log, index) => (
+                  <div
+                    key={log.id}
+                    className={`flex flex-col gap-2 p-5 md:flex-row md:items-center md:justify-between ${
+                      index !== activityLogs.length - 1
+                        ? "border-b border-white/10"
+                        : ""
+                    }`}
+                  >
+                    <div>
+                      <p className="text-sm font-medium text-white/80">
+                        {log.description}
+                      </p>
+                      <p className="mt-1 text-[11px] uppercase tracking-[0.15em] text-[#c9a35b]/60">
+                        {activityLabel(log.action_type)}
+                      </p>
+                    </div>
+
+                    <p className="shrink-0 text-xs text-white/35">
+                      {formatLogDate(log.created_at)}
+                    </p>
                   </div>
                 ))}
               </div>
@@ -683,49 +1189,218 @@ export default function AdminPage() {
 
         {activeTab === "services" && (
           <section className="mt-6">
-            <SectionTitle eyebrow="HİZMETLER" title="Hizmetler & Fiyatlar" description="İsim, fiyat ve hizmet süresini değiştir. Kapattığın hizmet müşteri tarafında görünmez." />
+            <SectionTitle
+              eyebrow="HİZMETLER"
+              title="Hizmetler & Fiyatlar"
+              description="İsim, fiyat ve hizmet süresini değiştir. Kapattığın hizmet müşteri tarafında görünmez."
+            />
+
             <div className="mt-6 grid gap-4">
               {services.map((service) => (
-                <div key={service.id} className="rounded-2xl border border-white/10 bg-[#101010] p-5">
+                <div
+                  key={service.id}
+                  className="rounded-2xl border border-white/10 bg-[#101010] p-5"
+                >
                   <div className="grid gap-4 md:grid-cols-[1.4fr_0.7fr_0.7fr_auto] md:items-end">
                     <Field label="Hizmet Adı">
-                      <input value={service.name} onChange={(e) => setServices((all) => all.map((s) => s.id === service.id ? { ...s, name: e.target.value } : s))} className={inputClass} />
+                      <input
+                        value={service.name}
+                        onChange={(e) =>
+                          setServices((all) =>
+                            all.map((item) =>
+                              item.id === service.id
+                                ? { ...item, name: e.target.value }
+                                : item
+                            )
+                          )
+                        }
+                        className={inputClass}
+                      />
                     </Field>
+
                     <Field label="Fiyat (TL)">
-                      <input type="number" min="0" value={service.price ?? ""} placeholder="Belirlenmedi" onChange={(e) => setServices((all) => all.map((s) => s.id === service.id ? { ...s, price: e.target.value === "" ? null : Number(e.target.value) } : s))} className={inputClass} />
+                      <input
+                        type="number"
+                        min="0"
+                        value={service.price ?? ""}
+                        placeholder="Belirlenmedi"
+                        onChange={(e) =>
+                          setServices((all) =>
+                            all.map((item) =>
+                              item.id === service.id
+                                ? {
+                                    ...item,
+                                    price:
+                                      e.target.value === ""
+                                        ? null
+                                        : Number(e.target.value),
+                                  }
+                                : item
+                            )
+                          )
+                        }
+                        className={inputClass}
+                      />
                     </Field>
+
                     <Field label="Süre (dk)">
-                      <input type="number" min="5" step="5" value={service.duration_minutes} onChange={(e) => setServices((all) => all.map((s) => s.id === service.id ? { ...s, duration_minutes: Number(e.target.value) } : s))} className={inputClass} />
+                      <input
+                        type="number"
+                        min="5"
+                        step="5"
+                        value={service.duration_minutes}
+                        onChange={(e) =>
+                          setServices((all) =>
+                            all.map((item) =>
+                              item.id === service.id
+                                ? {
+                                    ...item,
+                                    duration_minutes: Number(
+                                      e.target.value
+                                    ),
+                                  }
+                                : item
+                            )
+                          )
+                        }
+                        className={inputClass}
+                      />
                     </Field>
-                    <button disabled={saving} onClick={() => saveService(service)} className="rounded-xl bg-[#c9a35b] px-5 py-3 font-bold text-black disabled:opacity-40">Kaydet</button>
+
+                    <button
+                      disabled={saving}
+                      onClick={() => saveService(service)}
+                      className="rounded-xl bg-[#c9a35b] px-5 py-3 font-bold text-black disabled:opacity-40"
+                    >
+                      Kaydet
+                    </button>
                   </div>
+
                   <label className="mt-4 flex cursor-pointer items-center gap-3 text-sm text-white/60">
-                    <input type="checkbox" checked={service.is_active} onChange={(e) => setServices((all) => all.map((s) => s.id === service.id ? { ...s, is_active: e.target.checked } : s))} className="h-4 w-4 accent-[#c9a35b]" />
+                    <input
+                      type="checkbox"
+                      checked={service.is_active}
+                      onChange={(e) =>
+                        setServices((all) =>
+                          all.map((item) =>
+                            item.id === service.id
+                              ? {
+                                  ...item,
+                                  is_active: e.target.checked,
+                                }
+                              : item
+                          )
+                        )
+                      }
+                      className="h-4 w-4 accent-[#c9a35b]"
+                    />
                     Hizmet aktif
                   </label>
                 </div>
               ))}
             </div>
-            <button disabled={saving} onClick={addService} className="mt-4 rounded-xl border border-[#c9a35b]/30 bg-[#c9a35b]/5 px-5 py-3 text-sm font-semibold text-[#c9a35b] disabled:opacity-40">+ Yeni Hizmet Ekle</button>
+
+            <button
+              disabled={saving}
+              onClick={addService}
+              className="mt-4 rounded-xl border border-[#c9a35b]/30 bg-[#c9a35b]/5 px-5 py-3 text-sm font-semibold text-[#c9a35b] disabled:opacity-40"
+            >
+              + Yeni Hizmet Ekle
+            </button>
           </section>
         )}
 
         {activeTab === "hours" && (
           <section className="mt-6">
-            <SectionTitle eyebrow="ÇALIŞMA PLANI" title="Çalışma Günleri & Saatleri" description="Kapalı yaptığın gün müşteriye randevu günü olarak gösterilmez." />
+            <SectionTitle
+              eyebrow="ÇALIŞMA PLANI"
+              title="Çalışma Günleri & Saatleri"
+              description="Kapalı yaptığın gün müşteriye randevu günü olarak gösterilmez."
+            />
+
             <div className="mt-6 grid gap-3">
               {workingHours.map((day) => (
-                <div key={day.id} className={`rounded-2xl border p-5 ${day.is_open ? "border-white/10 bg-[#101010]" : "border-red-500/15 bg-red-500/[0.03]"}`}>
+                <div
+                  key={day.id}
+                  className={`rounded-2xl border p-5 ${
+                    day.is_open
+                      ? "border-white/10 bg-[#101010]"
+                      : "border-red-500/15 bg-red-500/[0.03]"
+                  }`}
+                >
                   <div className="flex flex-col gap-4 md:flex-row md:items-end">
                     <label className="flex min-w-44 cursor-pointer items-center gap-3 pb-3 font-semibold">
-                      <input type="checkbox" checked={day.is_open} onChange={(e) => setWorkingHours((all) => all.map((d) => d.id === day.id ? { ...d, is_open: e.target.checked } : d))} className="h-4 w-4 accent-[#c9a35b]" />
+                      <input
+                        type="checkbox"
+                        checked={day.is_open}
+                        onChange={(e) =>
+                          setWorkingHours((all) =>
+                            all.map((item) =>
+                              item.id === day.id
+                                ? {
+                                    ...item,
+                                    is_open: e.target.checked,
+                                  }
+                                : item
+                            )
+                          )
+                        }
+                        className="h-4 w-4 accent-[#c9a35b]"
+                      />
                       {day.day_name}
                     </label>
+
                     <div className="grid flex-1 grid-cols-2 gap-3">
-                      <Field label="Açılış"><input type="time" disabled={!day.is_open} value={day.open_time.slice(0,5)} onChange={(e) => setWorkingHours((all) => all.map((d) => d.id === day.id ? { ...d, open_time: e.target.value } : d))} className={inputClass} /></Field>
-                      <Field label="Kapanış"><input type="time" disabled={!day.is_open} value={day.close_time.slice(0,5)} onChange={(e) => setWorkingHours((all) => all.map((d) => d.id === day.id ? { ...d, close_time: e.target.value } : d))} className={inputClass} /></Field>
+                      <Field label="Açılış">
+                        <input
+                          type="time"
+                          disabled={!day.is_open}
+                          value={day.open_time.slice(0, 5)}
+                          onChange={(e) =>
+                            setWorkingHours((all) =>
+                              all.map((item) =>
+                                item.id === day.id
+                                  ? {
+                                      ...item,
+                                      open_time: e.target.value,
+                                    }
+                                  : item
+                              )
+                            )
+                          }
+                          className={inputClass}
+                        />
+                      </Field>
+
+                      <Field label="Kapanış">
+                        <input
+                          type="time"
+                          disabled={!day.is_open}
+                          value={day.close_time.slice(0, 5)}
+                          onChange={(e) =>
+                            setWorkingHours((all) =>
+                              all.map((item) =>
+                                item.id === day.id
+                                  ? {
+                                      ...item,
+                                      close_time: e.target.value,
+                                    }
+                                  : item
+                              )
+                            )
+                          }
+                          className={inputClass}
+                        />
+                      </Field>
                     </div>
-                    <button disabled={saving} onClick={() => saveWorkingHour(day)} className="rounded-xl bg-[#c9a35b] px-5 py-3 font-bold text-black disabled:opacity-40">Kaydet</button>
+
+                    <button
+                      disabled={saving}
+                      onClick={() => saveWorkingHour(day)}
+                      className="rounded-xl bg-[#c9a35b] px-5 py-3 font-bold text-black disabled:opacity-40"
+                    >
+                      Kaydet
+                    </button>
                   </div>
                 </div>
               ))}
@@ -735,20 +1410,97 @@ export default function AdminPage() {
 
         {activeTab === "business" && business && (
           <section className="mt-6">
-            <SectionTitle eyebrow="İŞLETME" title="İşletme Ayarları" description="Buradaki bilgiler müşteri tarafında kullanılabilir. Değişiklikten sonra Kaydet'e bas." />
+            <SectionTitle
+              eyebrow="İŞLETME"
+              title="İşletme Ayarları"
+              description="Buradaki bilgiler müşteri tarafında kullanılabilir. Değişiklikten sonra Kaydet'e bas."
+            />
+
             <div className="mt-6 rounded-2xl border border-white/10 bg-[#101010] p-5 md:p-6">
               <div className="grid gap-5 md:grid-cols-2">
-                <Field label="Berber Adı"><input value={business.barber_name} onChange={(e) => setBusiness({ ...business, barber_name: e.target.value })} className={inputClass} /></Field>
-                <Field label="Telefon"><input value={business.phone} onChange={(e) => setBusiness({ ...business, phone: e.target.value })} className={inputClass} /></Field>
-                <Field label="Instagram"><input value={business.instagram} onChange={(e) => setBusiness({ ...business, instagram: e.target.value })} className={inputClass} /></Field>
+                <Field label="Berber Adı">
+                  <input
+                    value={business.barber_name}
+                    onChange={(e) =>
+                      setBusiness({
+                        ...business,
+                        barber_name: e.target.value,
+                      })
+                    }
+                    className={inputClass}
+                  />
+                </Field>
+
+                <Field label="Telefon">
+                  <input
+                    value={business.phone}
+                    onChange={(e) =>
+                      setBusiness({
+                        ...business,
+                        phone: e.target.value,
+                      })
+                    }
+                    className={inputClass}
+                  />
+                </Field>
+
+                <Field label="Instagram">
+                  <input
+                    value={business.instagram}
+                    onChange={(e) =>
+                      setBusiness({
+                        ...business,
+                        instagram: e.target.value,
+                      })
+                    }
+                    className={inputClass}
+                  />
+                </Field>
+
                 <Field label="Randevu Aralığı (dk)">
-                  <select value={business.appointment_interval} onChange={(e) => setBusiness({ ...business, appointment_interval: Number(e.target.value) })} className={inputClass}>
-                    <option value={15}>15 dakika</option><option value={30}>30 dakika</option><option value={45}>45 dakika</option><option value={60}>60 dakika</option><option value={90}>90 dakika</option>
+                  <select
+                    value={business.appointment_interval}
+                    onChange={(e) =>
+                      setBusiness({
+                        ...business,
+                        appointment_interval: Number(e.target.value),
+                      })
+                    }
+                    className={inputClass}
+                  >
+                    <option value={15}>15 dakika</option>
+                    <option value={30}>30 dakika</option>
+                    <option value={45}>45 dakika</option>
+                    <option value={60}>60 dakika</option>
+                    <option value={90}>90 dakika</option>
                   </select>
                 </Field>
-                <div className="md:col-span-2"><Field label="Adres"><textarea rows={3} value={business.address ?? ""} onChange={(e) => setBusiness({ ...business, address: e.target.value })} placeholder="Adres henüz girilmedi" className={inputClass} /></Field></div>
+
+                <div className="md:col-span-2">
+                  <Field label="Adres">
+                    <textarea
+                      rows={3}
+                      value={business.address ?? ""}
+                      onChange={(e) =>
+                        setBusiness({
+                          ...business,
+                          address: e.target.value,
+                        })
+                      }
+                      placeholder="Adres henüz girilmedi"
+                      className={inputClass}
+                    />
+                  </Field>
+                </div>
               </div>
-              <button disabled={saving} onClick={saveBusiness} className="mt-6 rounded-xl bg-[#c9a35b] px-6 py-3 font-bold text-black disabled:opacity-40">{saving ? "Kaydediliyor..." : "Ayarları Kaydet"}</button>
+
+              <button
+                disabled={saving}
+                onClick={saveBusiness}
+                className="mt-6 rounded-xl bg-[#c9a35b] px-6 py-3 font-bold text-black disabled:opacity-40"
+              >
+                {saving ? "Kaydediliyor..." : "Ayarları Kaydet"}
+              </button>
             </div>
           </section>
         )}
@@ -757,7 +1509,184 @@ export default function AdminPage() {
   );
 }
 
-const inputClass = "mt-2 w-full rounded-xl border border-white/10 bg-[#171717] px-4 py-3 text-white outline-none transition focus:border-[#c9a35b]/60 disabled:cursor-not-allowed disabled:opacity-35";
+const inputClass =
+  "mt-2 w-full rounded-xl border border-white/10 bg-[#171717] px-4 py-3 text-white outline-none transition focus:border-[#c9a35b]/60 disabled:cursor-not-allowed disabled:opacity-35";
+
+function AppointmentCard({
+  appointment,
+  updatingId,
+  onUpdateStatus,
+}: {
+  appointment: Appointment;
+  updatingId: number | null;
+  onUpdateStatus: (id: number, status: string) => void;
+}) {
+  return (
+    <div
+      className={`rounded-2xl border p-5 transition md:p-6 ${
+        appointment.status === "completed"
+          ? "border-emerald-500/35 bg-emerald-500/[0.07]"
+          : appointment.status === "rejected"
+          ? "border-red-500/35 bg-red-500/[0.07]"
+          : appointment.status === "cancelled"
+          ? "border-white/10 bg-white/[0.025] opacity-55"
+          : appointment.status === "approved"
+          ? "border-blue-400/35 bg-blue-400/[0.06]"
+          : "border-amber-400/30 bg-amber-400/[0.05]"
+      }`}
+    >
+      <div className="flex flex-col justify-between gap-5 lg:flex-row lg:items-center">
+        <div className="grid flex-1 gap-5 sm:grid-cols-2 lg:grid-cols-5">
+          <Info label="Müşteri" value={appointment.customer_name} />
+          <WhatsAppPhone appointment={appointment} />
+          <Info
+            label="Hizmet"
+            value={appointment.services?.name ?? "-"}
+          />
+          <Info
+            label="Tarih / Saat"
+            value={`${appointment.appointment_date} • ${appointment.appointment_time.slice(
+              0,
+              5
+            )}`}
+          />
+          <Info
+            label="Fiyat"
+            value={`${Number(
+              appointment.price_at_booking ??
+                appointment.services?.price ??
+                0
+            ).toLocaleString("tr-TR")} ₺`}
+          />
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          <ActionButton
+            disabled={
+              updatingId !== null || appointment.status === "approved"
+            }
+            onClick={() =>
+              onUpdateStatus(appointment.id, "approved")
+            }
+            kind="gold"
+          >
+            {updatingId === appointment.id
+              ? "İşleniyor..."
+              : "Onayla"}
+          </ActionButton>
+
+          <ActionButton
+            disabled={
+              updatingId !== null || appointment.status === "completed"
+            }
+            onClick={() =>
+              onUpdateStatus(appointment.id, "completed")
+            }
+            kind="green"
+          >
+            Tamamlandı
+          </ActionButton>
+
+          <ActionButton
+            disabled={
+              updatingId !== null || appointment.status === "rejected"
+            }
+            onClick={() =>
+              onUpdateStatus(appointment.id, "rejected")
+            }
+            kind="red"
+          >
+            Reddet
+          </ActionButton>
+
+          <ActionButton
+            disabled={
+              updatingId !== null || appointment.status === "cancelled"
+            }
+            onClick={() =>
+              onUpdateStatus(appointment.id, "cancelled")
+            }
+            kind="gray"
+          >
+            İptal
+          </ActionButton>
+        </div>
+      </div>
+
+      <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-white/10 pt-4">
+        <StatusBadge status={appointment.status} />
+
+        {appointment.customer_note && (
+          <span
+            className={`text-xs text-white/35 ${
+              appointment.status === "cancelled"
+                ? "line-through"
+                : ""
+            }`}
+          >
+            Not: {appointment.customer_note}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function WhatsAppPhone({
+  appointment,
+}: {
+  appointment: Appointment;
+}) {
+  const phoneDigits = appointment.customer_phone.replace(/\D/g, "");
+  let whatsappNumber = phoneDigits;
+
+  if (phoneDigits.startsWith("0")) {
+    whatsappNumber = `90${phoneDigits.slice(1)}`;
+  } else if (phoneDigits.length === 10) {
+    whatsappNumber = `90${phoneDigits}`;
+  }
+
+  const date = appointment.appointment_date
+    ? appointment.appointment_date.split("-").reverse().join(".")
+    : "";
+
+  const time = appointment.appointment_time?.slice(0, 5) ?? "";
+  const service = appointment.services?.name ?? "Randevu";
+
+  const statusMessages: Record<string, string> = {
+    approved: `Merhaba ${appointment.customer_name} 👋\nRandevunuz onaylandı. ✅\n\n📅 ${date}\n🕒 ${time}\n✂️ ${service}\n\nGörüşmek üzere.\nMurathan Yazar`,
+    completed: `Merhaba ${appointment.customer_name} 👋\nBugün bizi tercih ettiğiniz için teşekkür ederiz.\n\nGörüşmek üzere.\nMurathan Yazar`,
+    rejected: `Merhaba ${appointment.customer_name} 👋\n${date} saat ${time} için oluşturduğunuz randevu talebi uygunluk nedeniyle onaylanamamıştır.\n\nFarklı bir saat için bizimle iletişime geçebilirsiniz.\nMurathan Yazar`,
+    cancelled: `Merhaba ${appointment.customer_name} 👋\n${date} saat ${time}'daki randevunuz iptal edilmiştir.\n\nYeni randevu için bizimle iletişime geçebilirsiniz.\nMurathan Yazar`,
+    pending: `Merhaba ${appointment.customer_name} 👋\n${date} saat ${time} için oluşturduğunuz ${service} randevu talebiniz hakkında iletişime geçiyoruz.\n\nMurathan Yazar`,
+  };
+
+  const message =
+    statusMessages[appointment.status] ??
+    `Merhaba ${appointment.customer_name}, Murathan Yazar Berber'den yazıyoruz.`;
+
+  const whatsappUrl = `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(
+    message
+  )}`;
+
+  return (
+    <div>
+      <p className="text-[10px] tracking-[0.15em] text-white/25">
+        TELEFON
+      </p>
+      <a
+        href={whatsappUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        title="WhatsApp'ta mesaj gönder"
+        className="mt-1 inline-flex items-center gap-1.5 font-medium text-emerald-300 transition hover:text-emerald-200 hover:underline"
+      >
+        {appointment.customer_phone}
+        <span className="text-xs">↗</span>
+      </a>
+    </div>
+  );
+}
 
 function Stat({
   title,
@@ -771,27 +1700,155 @@ function Stat({
   return (
     <div className="rounded-2xl border border-white/10 bg-[#101010] p-5">
       <p className="text-xs text-white/35">{title}</p>
-      <p className="mt-2 text-3xl font-bold text-[#c9a35b]">{value}</p>
-      {subtitle && <p className="mt-2 text-[11px] text-white/25">{subtitle}</p>}
+      <p className="mt-2 text-3xl font-bold text-[#c9a35b]">
+        {value}
+      </p>
+      {subtitle && (
+        <p className="mt-2 text-[11px] text-white/25">
+          {subtitle}
+        </p>
+      )}
     </div>
   );
 }
-function Info({ label, value }: { label: string; value: string }) {
-  return <div><p className="text-[10px] tracking-[0.15em] text-white/25">{label.toUpperCase()}</p><p className="mt-1 font-medium">{value}</p></div>;
+
+function Info({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
+  return (
+    <div>
+      <p className="text-[10px] tracking-[0.15em] text-white/25">
+        {label.toUpperCase()}
+      </p>
+      <p className="mt-1 font-medium">{value}</p>
+    </div>
+  );
 }
-function TabButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
-  return <button onClick={onClick} className={`whitespace-nowrap rounded-xl border px-4 py-3 text-sm font-semibold transition ${active ? "border-[#c9a35b]/40 bg-[#c9a35b]/10 text-[#c9a35b]" : "border-white/10 bg-[#101010] text-white/45 hover:text-white"}`}>{children}</button>;
+
+function TabButton({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`whitespace-nowrap rounded-xl border px-4 py-3 text-sm font-semibold transition ${
+        active
+          ? "border-[#c9a35b]/40 bg-[#c9a35b]/10 text-[#c9a35b]"
+          : "border-white/10 bg-[#101010] text-white/45 hover:text-white"
+      }`}
+    >
+      {children}
+    </button>
+  );
 }
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return <label className="block text-xs text-white/40">{label}{children}</label>;
+
+function Field({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <label className="block text-xs text-white/40">
+      {label}
+      {children}
+    </label>
+  );
 }
-function SectionTitle({ eyebrow, title, description }: { eyebrow: string; title: string; description: string }) {
-  return <div><p className="text-xs tracking-[0.25em] text-[#c9a35b]">{eyebrow}</p><h1 className="mt-2 text-3xl font-bold">{title}</h1><p className="mt-2 max-w-2xl text-sm leading-6 text-white/40">{description}</p></div>;
+
+function SectionTitle({
+  eyebrow,
+  title,
+  description,
+}: {
+  eyebrow: string;
+  title: string;
+  description: string;
+}) {
+  return (
+    <div>
+      <p className="text-xs tracking-[0.25em] text-[#c9a35b]">
+        {eyebrow}
+      </p>
+      <h1 className="mt-2 text-3xl font-bold">{title}</h1>
+      <p className="mt-2 max-w-2xl text-sm leading-6 text-white/40">
+        {description}
+      </p>
+    </div>
+  );
 }
-function ActionButton({ disabled, onClick, kind, children }: { disabled: boolean; onClick: () => void; kind: "gold" | "green" | "red" | "gray"; children: React.ReactNode }) {
-  const styles = kind === "gold" ? "bg-[#c9a35b] text-black" : kind === "green" ? "border border-emerald-500/30 text-emerald-300" : kind === "red" ? "border border-red-500/30 text-red-300" : "border border-white/15 text-white/50";
-  return <button disabled={disabled} onClick={onClick} className={`rounded-lg px-4 py-2 text-xs font-bold disabled:cursor-not-allowed disabled:opacity-40 ${styles}`}>{children}</button>;
+
+function ActionButton({
+  disabled,
+  onClick,
+  kind,
+  children,
+}: {
+  disabled: boolean;
+  onClick: () => void;
+  kind: "gold" | "green" | "red" | "gray";
+  children: React.ReactNode;
+}) {
+  const styles =
+    kind === "gold"
+      ? "bg-[#c9a35b] text-black"
+      : kind === "green"
+      ? "border border-emerald-500/30 text-emerald-300"
+      : kind === "red"
+      ? "border border-red-500/30 text-red-300"
+      : "border border-white/15 text-white/50";
+
+  return (
+    <button
+      disabled={disabled}
+      onClick={onClick}
+      className={`rounded-lg px-4 py-2 text-xs font-bold disabled:cursor-not-allowed disabled:opacity-40 ${styles}`}
+    >
+      {children}
+    </button>
+  );
 }
+
+function StatusBadge({ status }: { status: string }) {
+  return (
+    <span
+      className={`rounded-full border px-3 py-1 text-[11px] font-semibold ${
+        status === "completed"
+          ? "border-emerald-500/35 bg-emerald-500/10 text-emerald-300"
+          : status === "rejected"
+          ? "border-red-500/35 bg-red-500/10 text-red-300"
+          : status === "cancelled"
+          ? "border-white/15 bg-white/5 text-white/35 line-through"
+          : status === "approved"
+          ? "border-blue-400/35 bg-blue-400/10 text-blue-300"
+          : "border-amber-400/35 bg-amber-400/10 text-amber-300"
+      }`}
+    >
+      {statusIcon(status)} {statusLabel(status)}
+    </span>
+  );
+}
+
+function activityLabel(action: string) {
+  if (action === "appointment_approved") return "Randevu Onayı";
+  if (action === "appointment_completed") return "Randevu Tamamlama";
+  if (action === "appointment_rejected") return "Randevu Reddi";
+  if (action === "appointment_cancelled") return "Randevu İptali";
+  if (action === "day_archived") return "Gün Arşivleme";
+  return "Panel İşlemi";
+}
+
 function statusIcon(status: string) {
   if (status === "pending") return "◷";
   if (status === "approved") return "✓";
@@ -800,6 +1857,7 @@ function statusIcon(status: string) {
   if (status === "cancelled") return "—";
   return "•";
 }
+
 function statusLabel(status: string) {
   if (status === "pending") return "Onay Bekliyor";
   if (status === "approved") return "Onaylandı";
