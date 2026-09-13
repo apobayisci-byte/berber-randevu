@@ -1926,7 +1926,9 @@ export default function AdminPage() {
 
                         {calendarDays.map((day) => {
                           const appointment = day.appointments.find(
-                            (item) => item.appointment_time.slice(0, 5) === slot
+                            (item) =>
+                              item.appointment_time.slice(0, 5) === slot &&
+                              !["cancelled", "rejected"].includes(item.status)
                           );
 
                           return (
