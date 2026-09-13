@@ -21,25 +21,17 @@ export const metadata: Metadata = {
     "Murathan Yazar Berber - Online randevunuzu kolayca oluşturun, hizmetleri ve çalışma saatlerini görüntüleyin.",
 
   alternates: {
-    canonical: "https://murathanyazar.com.tr",
+    canonical: "/",
   },
 
   openGraph: {
     title: "Murathan Yazar | Berber",
     description:
       "Online randevunuzu kolayca oluşturun. Hizmetleri, fiyatları ve çalışma saatlerini görüntüleyin.",
-    url: "https://murathanyazar.com.tr",
+    url: "/",
     siteName: "Murathan Yazar | Berber",
     locale: "tr_TR",
     type: "website",
-    images: [
-      {
-        url: "/my-logo.png",
-        width: 1200,
-        height: 630,
-        alt: "Murathan Yazar | Berber",
-      },
-    ],
   },
 
   twitter: {
@@ -47,7 +39,6 @@ export const metadata: Metadata = {
     title: "Murathan Yazar | Berber",
     description:
       "Online randevunuzu kolayca oluşturun. Hizmetleri, fiyatları ve çalışma saatlerini görüntüleyin.",
-    images: ["/my-logo.png"],
   },
 
   icons: {
