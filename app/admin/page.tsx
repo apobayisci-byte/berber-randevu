@@ -97,6 +97,11 @@ export default function AdminPage() {
   const [manualServiceId, setManualServiceId] = useState<number | null>(null);
   const [manualSaving, setManualSaving] = useState(false);
 
+  const [moveAppointment, setMoveAppointment] = useState<Appointment | null>(null);
+  const [moveDate, setMoveDate] = useState("");
+  const [moveTime, setMoveTime] = useState("");
+  const [moveSaving, setMoveSaving] = useState(false);
+
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [activityLogs, setActivityLogs] = useState<ActivityLog[]>([]);
   const [services, setServices] = useState<Service[]>([]);
@@ -160,16 +165,18 @@ export default function AdminPage() {
     return snapshotTotal > 0 ? snapshotTotal : business?.appointment_interval ?? 30;
   };
 
-  const isManualSlotAvailable = (
+  const isSlotAvailable = (
     date: string,
     time: string,
-    duration: number
+    duration: number,
+    excludeAppointmentId?: number
   ) => {
     const start = timeToMinutesAdmin(time);
     const end = start + duration;
 
     return !appointments.some((appointment) => {
       if (
+        appointment.id === excludeAppointmentId ||
         appointment.is_archived ||
         appointment.appointment_date !== date ||
         ["cancelled", "rejected"].includes(appointment.status)
@@ -178,12 +185,17 @@ export default function AdminPage() {
       }
 
       const existingStart = timeToMinutesAdmin(appointment.appointment_time);
-      const existingEnd =
-        existingStart + appointmentDuration(appointment);
+      const existingEnd = existingStart + appointmentDuration(appointment);
 
       return start < existingEnd && existingStart < end;
     });
   };
+
+  const isManualSlotAvailable = (
+    date: string,
+    time: string,
+    duration: number
+  ) => isSlotAvailable(date, time, duration);
 
   const loadAppointments = async () => {
     const { data, error } = await supabase
@@ -666,7 +678,7 @@ export default function AdminPage() {
     ) {
       showNotice(
         "error",
-        "Bu saat işlem süresi + 5 dk mola nedeniyle uygun değil."
+        "Bu saat seçilen işlemin süresi nedeniyle uygun değil."
       );
       return;
     }
@@ -736,6 +748,131 @@ export default function AdminPage() {
     } finally {
       setManualSaving(false);
     }
+  };
+
+  const getDateSchedule = (date: string) => {
+    const special = specialWorkingHours.find((item) => item.work_date === date);
+    if (special) {
+      return {
+        isOpen: special.is_open,
+        openTime: special.open_time?.slice(0, 5) ?? "10:00",
+        closeTime: special.close_time?.slice(0, 5) ?? "22:00",
+      };
+    }
+
+    const parsed = new Date(`${date}T12:00:00`);
+    const jsDay = parsed.getDay();
+    if (jsDay === 0) {
+      return { isOpen: false, openTime: "10:00", closeTime: "22:00" };
+    }
+
+    // Veritabanında Pazartesi=1 ... Pazar=7 düzenini kullanıyoruz.
+    const normal = workingHours.find((item) => item.day_of_week === jsDay);
+    return {
+      isOpen: normal?.is_open ?? true,
+      openTime: normal?.open_time?.slice(0, 5) ?? "10:00",
+      closeTime: normal?.close_time?.slice(0, 5) ?? "22:00",
+    };
+  };
+
+  const getMoveDates = () => {
+    const result: string[] = [];
+    const today = new Date();
+
+    for (let i = 0; result.length < 20 && i < 40; i++) {
+      const date = new Date(today);
+      date.setDate(today.getDate() + i);
+      const key = localDateKey(date);
+      if (getDateSchedule(key).isOpen) result.push(key);
+    }
+
+    return result;
+  };
+
+  const getMoveTimes = (appointment: Appointment, date: string) => {
+    if (!date) return [];
+
+    const schedule = getDateSchedule(date);
+    if (!schedule.isOpen) return [];
+
+    const duration = appointmentDuration(appointment);
+    const interval = Math.max(15, Number(business?.appointment_interval || 15));
+    const open = timeToMinutesAdmin(schedule.openTime);
+    const close = timeToMinutesAdmin(schedule.closeTime);
+    const result: string[] = [];
+
+    for (let minute = open; minute + duration <= close; minute += interval) {
+      const time = minutesToTimeAdmin(minute);
+      if (isSlotAvailable(date, time, duration, appointment.id)) {
+        result.push(time);
+      }
+    }
+
+    return result;
+  };
+
+  const openMoveAppointment = (appointment: Appointment) => {
+    const dates = getMoveDates();
+    const initialDate = dates.includes(appointment.appointment_date)
+      ? appointment.appointment_date
+      : dates[0] ?? "";
+
+    setMoveAppointment(appointment);
+    setMoveDate(initialDate);
+    setMoveTime("");
+    setSelectedAppointment(null);
+  };
+
+  const saveMovedAppointment = async () => {
+    if (!moveAppointment || !moveDate || !moveTime || moveSaving) return;
+
+    const duration = appointmentDuration(moveAppointment);
+    if (!isSlotAvailable(moveDate, moveTime, duration, moveAppointment.id)) {
+      showNotice("error", "Seçtiğin saat artık dolu. Başka bir saat seç.");
+      return;
+    }
+
+    const oldDate = moveAppointment.appointment_date;
+    const oldTime = moveAppointment.appointment_time.slice(0, 5);
+
+    setMoveSaving(true);
+
+    const { error: moveError } = await supabase
+      .from("appointments")
+      .update({
+        appointment_date: moveDate,
+        appointment_time: moveTime,
+      })
+      .eq("id", moveAppointment.id);
+
+    if (moveError) {
+      console.error("Randevu taşınamadı:", moveError);
+      showNotice("error", "Randevu taşınamadı. Saat dolmuş olabilir.");
+      setMoveSaving(false);
+      return;
+    }
+
+    try {
+      await addActivityLog(
+        moveAppointment.id,
+        "appointment_moved",
+        `${moveAppointment.customer_name} adlı müşterinin randevusu ${formatDate(
+          oldDate
+        )} ${oldTime} saatinden ${formatDate(moveDate)} ${moveTime} saatine taşındı.`
+      );
+    } catch (logError) {
+      console.error("Taşıma işlem logu kaydedilemedi:", logError);
+    }
+
+    await Promise.all([loadAppointments(), loadActivityLogs()]);
+    showNotice(
+      "success",
+      `Randevu ${formatDate(moveDate)} ${moveTime} saatine taşındı.`
+    );
+    setMoveAppointment(null);
+    setMoveDate("");
+    setMoveTime("");
+    setMoveSaving(false);
   };
 
   const deleteManualAppointment = async (appointment: Appointment) => {
@@ -1308,6 +1445,95 @@ export default function AdminPage() {
         </div>
       )}
 
+      {moveAppointment && (
+        <div
+          className="fixed inset-0 z-[170] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
+          onClick={() => !moveSaving && setMoveAppointment(null)}
+        >
+          <div
+            className="w-full max-w-md rounded-2xl border border-white/10 bg-[#111] p-5 shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-[10px] tracking-[0.25em] text-[#c9a35b]">
+                  RANDEVUYU TAŞI
+                </p>
+                <h2 className="mt-2 text-xl font-bold">
+                  {moveAppointment.customer_name}
+                </h2>
+                <p className="mt-1 text-xs text-white/40">
+                  Şu an: {formatDate(moveAppointment.appointment_date)} •{" "}
+                  {moveAppointment.appointment_time.slice(0, 5)}
+                </p>
+              </div>
+              <button
+                type="button"
+                disabled={moveSaving}
+                onClick={() => setMoveAppointment(null)}
+                className="rounded-lg border border-white/10 px-3 py-2 text-xs text-white/50 disabled:opacity-40"
+              >
+                Kapat
+              </button>
+            </div>
+
+            <label className="mt-6 block text-xs text-white/40">YENİ TARİH</label>
+            <select
+              value={moveDate}
+              onChange={(event) => {
+                setMoveDate(event.target.value);
+                setMoveTime("");
+              }}
+              className="mt-2 w-full rounded-xl border border-white/10 bg-[#171717] px-4 py-3 text-sm text-white outline-none focus:border-[#c9a35b]/60"
+            >
+              {getMoveDates().map((date) => (
+                <option key={date} value={date}>
+                  {formatDate(date)}
+                </option>
+              ))}
+            </select>
+
+            <label className="mt-4 block text-xs text-white/40">YENİ SAAT</label>
+            <div className="mt-2 grid max-h-48 grid-cols-5 gap-1.5 overflow-y-auto pr-1">
+              {getMoveTimes(moveAppointment, moveDate).map((time) => (
+                <button
+                  key={time}
+                  type="button"
+                  onClick={() => setMoveTime(time)}
+                  className={`rounded-lg border px-2 py-2 text-xs font-semibold transition ${
+                    moveTime === time
+                      ? "border-[#c9a35b] bg-[#c9a35b] text-black"
+                      : "border-white/10 bg-[#171717] text-white/70 hover:border-[#c9a35b]/50"
+                  }`}
+                >
+                  {time}
+                </button>
+              ))}
+            </div>
+
+            {getMoveTimes(moveAppointment, moveDate).length === 0 && (
+              <div className="mt-2 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 text-center text-xs text-white/40">
+                Bu tarihte işlemin sığacağı boş saat yok.
+              </div>
+            )}
+
+            <p className="mt-3 text-[11px] leading-5 text-white/35">
+              Yalnızca {appointmentDuration(moveAppointment)} dakikalık işlemin
+              tamamının boş olduğu saatler gösterilir.
+            </p>
+
+            <button
+              type="button"
+              disabled={!moveTime || moveSaving}
+              onClick={saveMovedAppointment}
+              className="mt-5 w-full rounded-xl bg-[#c9a35b] py-3.5 text-sm font-bold text-black transition hover:bg-[#dfbd76] disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {moveSaving ? "Taşınıyor..." : "Randevuyu Taşı"}
+            </button>
+          </div>
+        </div>
+      )}
+
       {selectedAppointment && (
         <div
           className="fixed inset-0 z-[150] flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm"
@@ -1361,54 +1587,70 @@ export default function AdminPage() {
               <div className="mt-5 rounded-xl border border-red-500/20 bg-red-500/[0.06] px-4 py-3 text-center text-sm font-bold text-red-300">
                 İPTAL EDİLDİ
               </div>
-            ) : (
-              selectedAppointment.customer_note ===
+            ) : selectedAppointment.customer_note ===
               "Admin panelinden manuel eklendi." ? (
+              <div className="mt-5 grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  disabled={updatingId !== null}
+                  onClick={() => openMoveAppointment(selectedAppointment)}
+                  className="rounded-xl border border-[#c9a35b]/30 bg-[#c9a35b]/[0.08] px-4 py-3 text-sm font-semibold text-[#dfbd76] disabled:opacity-40"
+                >
+                  Taşı
+                </button>
                 <button
                   type="button"
                   disabled={updatingId !== null}
                   onClick={() => deleteManualAppointment(selectedAppointment)}
-                  className="mt-5 w-full rounded-xl border border-red-500/25 bg-red-500/[0.07] px-4 py-3 text-sm font-semibold text-red-300 disabled:opacity-40"
+                  className="rounded-xl border border-red-500/25 bg-red-500/[0.07] px-4 py-3 text-sm font-semibold text-red-300 disabled:opacity-40"
                 >
                   {updatingId === selectedAppointment.id
                     ? "Siliniyor..."
-                    : "Manuel Randevuyu Sil"}
+                    : "Sil"}
                 </button>
-              ) : (
-                <div className="mt-5 grid grid-cols-2 gap-2">
-                  <a
-                    href={`https://wa.me/${selectedAppointment.customer_phone.replace(
-                      /\D/g,
-                      ""
-                    )}`}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="rounded-xl border border-emerald-500/25 bg-emerald-500/[0.07] px-4 py-3 text-center text-sm font-semibold text-emerald-300"
-                  >
-                    WhatsApp
-                  </a>
-                  <button
-                    type="button"
-                    disabled={updatingId !== null}
-                    onClick={async () => {
-                      const confirmed = window.confirm(
-                        `${selectedAppointment.customer_name} adlı müşterinin randevusu iptal edilsin mi?`
-                      );
-                      if (!confirmed) return;
+              </div>
+            ) : (
+              <div className="mt-5 grid grid-cols-3 gap-2">
+                <a
+                  href={`https://wa.me/${selectedAppointment.customer_phone.replace(
+                    /\D/g,
+                    ""
+                  )}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="rounded-xl border border-emerald-500/25 bg-emerald-500/[0.07] px-2 py-3 text-center text-xs font-semibold text-emerald-300"
+                >
+                  WhatsApp
+                </a>
+                <button
+                  type="button"
+                  disabled={updatingId !== null}
+                  onClick={() => openMoveAppointment(selectedAppointment)}
+                  className="rounded-xl border border-[#c9a35b]/30 bg-[#c9a35b]/[0.08] px-2 py-3 text-xs font-semibold text-[#dfbd76] disabled:opacity-40"
+                >
+                  Taşı
+                </button>
+                <button
+                  type="button"
+                  disabled={updatingId !== null}
+                  onClick={async () => {
+                    const confirmed = window.confirm(
+                      `${selectedAppointment.customer_name} adlı müşterinin randevusu iptal edilsin mi?`
+                    );
+                    if (!confirmed) return;
 
-                      await updateStatus(selectedAppointment.id, "cancelled");
-                      setSelectedAppointment((current) =>
-                        current ? { ...current, status: "cancelled" } : current
-                      );
-                    }}
-                    className="rounded-xl border border-red-500/25 bg-red-500/[0.07] px-4 py-3 text-sm font-semibold text-red-300 disabled:opacity-40"
-                  >
-                    {updatingId === selectedAppointment.id
-                      ? "İptal ediliyor..."
-                      : "İptal Et"}
-                  </button>
-                </div>
-              )
+                    await updateStatus(selectedAppointment.id, "cancelled");
+                    setSelectedAppointment((current) =>
+                      current ? { ...current, status: "cancelled" } : current
+                    );
+                  }}
+                  className="rounded-xl border border-red-500/25 bg-red-500/[0.07] px-2 py-3 text-xs font-semibold text-red-300 disabled:opacity-40"
+                >
+                  {updatingId === selectedAppointment.id
+                    ? "İptal..."
+                    : "İptal Et"}
+                </button>
+              </div>
             )}
           </div>
         </div>
