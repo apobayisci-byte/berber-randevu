@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  metadataBase: new URL("https://murathanyazar.com.tr"),
+  metadataBase: new URL("https://www.murathanyazar.com.tr"),
 
   title: "Murathan Yazar | Berber",
 
@@ -21,21 +21,27 @@ export const metadata: Metadata = {
     "Murathan Yazar Berber - Online randevunuzu kolayca oluşturun, hizmetleri ve çalışma saatlerini görüntüleyin.",
 
   alternates: {
-    canonical: "/",
+    canonical: "https://www.murathanyazar.com.tr",
   },
 
   openGraph: {
     title: "Murathan Yazar | Berber",
+
     description:
       "Online randevunuzu kolayca oluşturun. Hizmetleri, fiyatları ve çalışma saatlerini görüntüleyin.",
-    url: "https://murathanyazar.com.tr",
+
+    url: "https://www.murathanyazar.com.tr",
+
     siteName: "Murathan Yazar | Berber",
+
     locale: "tr_TR",
+
     type: "website",
 
     images: [
       {
-        url: "https://murathanyazar.com.tr/og-image.png",
+        url: "https://www.murathanyazar.com.tr/og-image.png",
+        secureUrl: "https://www.murathanyazar.com.tr/og-image.png",
         width: 1200,
         height: 630,
         alt: "Murathan Yazar | Berber",
@@ -46,14 +52,18 @@ export const metadata: Metadata = {
 
   twitter: {
     card: "summary_large_image",
+
     title: "Murathan Yazar | Berber",
+
     description:
       "Online randevunuzu kolayca oluşturun. Hizmetleri, fiyatları ve çalışma saatlerini görüntüleyin.",
-    images: ["https://murathanyazar.com.tr/og-image.png"],
+
+    images: ["https://www.murathanyazar.com.tr/og-image.png"],
   },
 
   icons: {
     icon: "/my-logo.png",
+    shortcut: "/my-logo.png",
     apple: "/my-logo.png",
   },
 };
