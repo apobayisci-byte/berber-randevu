@@ -77,34 +77,6 @@ function maskReviewPhone(phone: string) {
   return `${firstFour} *** ** **`;
 }
 
-function timeToMinutes(time: string) {
-  const [hour, minute] = time.split(":").map(Number);
-  return hour * 60 + minute;
-}
-
-function createTimeSlots(
-  openTime: string,
-  closeTime: string,
-  intervalMinutes: number
-) {
-  const slots: string[] = [];
-  let totalMinutes = timeToMinutes(openTime);
-  const closingMinutes = timeToMinutes(closeTime);
-
-  while (totalMinutes < closingMinutes) {
-    const hour = Math.floor(totalMinutes / 60);
-    const minute = totalMinutes % 60;
-
-    slots.push(
-      `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`
-    );
-
-    totalMinutes += intervalMinutes;
-  }
-
-  return slots;
-}
-
 function createDateOptions(workingHours: WorkingHour[]): DateOption[] {
   const dates: DateOption[] = [];
 
@@ -193,13 +165,6 @@ export default function Home() {
   const [reviewSaving, setReviewSaving] = useState(false);
   const [reviewError, setReviewError] = useState("");
   const [reviewSent, setReviewSent] = useState(false);
-  const [publicReviewOpen, setPublicReviewOpen] = useState(false);
-  const [publicReviewName, setPublicReviewName] = useState("");
-  const [publicReviewRating, setPublicReviewRating] = useState(5);
-  const [publicReviewComment, setPublicReviewComment] = useState("");
-  const [publicReviewSaving, setPublicReviewSaving] = useState(false);
-  const [publicReviewError, setPublicReviewError] = useState("");
-  const [publicReviewSent, setPublicReviewSent] = useState(false);
   const [availableTimes, setAvailableTimes] = useState<string[]>([]);
   const [availableTimesLoading, setAvailableTimesLoading] = useState(false);
   const [availabilityError, setAvailabilityError] = useState("");
@@ -334,7 +299,7 @@ export default function Home() {
       return;
     }
 
-    const pageCount = Math.ceil(Math.min(reviews.length, 12) / 6);
+    const pageCount = Math.ceil(reviews.length / 6);
 
     const timer = window.setInterval(() => {
       setReviewAnimating(true);
@@ -385,7 +350,7 @@ export default function Home() {
     };
 
     loadSchedule();
-  }, [view]);
+  }, []);
 
   useEffect(() => {
     const loadAvailableTimes = async () => {
@@ -445,19 +410,9 @@ export default function Home() {
     (date) => date.value === selectedDate
   );
 
-  const selectedWorkingDay = workingHours.find(
-    (item) => item.day_of_week === selectedDateInfo?.dayOfWeek
-  );
-
-  const timeSlots = useMemo(() => {
-    if (!selectedWorkingDay?.is_open) return [];
-
-    return createTimeSlots(
-      selectedWorkingDay.open_time,
-      selectedWorkingDay.close_time,
-      appointmentInterval
-    );
-  }, [selectedWorkingDay, appointmentInterval]);
+  // Saat listesi artık API tarafından dinamik üretiliyor.
+  // Böylece 10:00'da 45 dk işlem + 5 dk mola varsa 10:50 de görünür.
+  const timeSlots = availableTimes;
 
   const selectedServices = useMemo(
     () =>
@@ -721,7 +676,7 @@ export default function Home() {
       }
 
       if (result.review) {
-        setReviews((current) => [result.review as Review, ...current].slice(0, 12));
+        setReviews((current) => [result.review as Review, ...current].slice(0, 10));
       }
 
       setReviewSent(true);
@@ -730,61 +685,6 @@ export default function Home() {
       setReviewError("Yorumunuz şu anda gönderilemedi.");
     } finally {
       setReviewSaving(false);
-    }
-  };
-
-  const handleSubmitPublicReview = async () => {
-    if (
-      !publicReviewName.trim() ||
-      !publicReviewComment.trim() ||
-      publicReviewSaving
-    ) {
-      return;
-    }
-
-    setPublicReviewSaving(true);
-    setPublicReviewError("");
-
-    try {
-      const response = await fetch("/api/reviews", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          customer_name: publicReviewName.trim(),
-          rating: publicReviewRating,
-          comment: publicReviewComment.trim(),
-        }),
-      });
-
-      const result = (await response.json()) as {
-        success?: boolean;
-        review?: Review;
-        error?: string;
-      };
-
-      if (!response.ok) {
-        setPublicReviewError(
-          result.error || "Değerlendirmen şu anda gönderilemedi."
-        );
-        return;
-      }
-
-      if (result.review) {
-        setReviews((current) => [result.review as Review, ...current].slice(0, 12));
-        setReviewPage(0);
-      }
-
-      setPublicReviewSent(true);
-      setPublicReviewName("");
-      setPublicReviewRating(5);
-      setPublicReviewComment("");
-    } catch (error) {
-      console.error("Değerlendirme gönderilemedi:", error);
-      setPublicReviewError("Değerlendirmen şu anda gönderilemedi.");
-    } finally {
-      setPublicReviewSaving(false);
     }
   };
 
@@ -819,12 +719,8 @@ export default function Home() {
         </div>
 
         <div className="relative z-10 w-full max-w-xl text-center">
-          <div className="mx-auto mb-8 flex h-16 w-16 items-center justify-center">
-            <img
-              src="/my-logo.png"
-              alt="Murathan Yazar"
-              className="h-16 w-16 object-contain"
-            />
+          <div className="mx-auto mb-8 flex h-16 w-16 items-center justify-center rounded-full border border-[#c9a35b]/40 bg-black/30 text-2xl text-[#c9a35b] shadow-2xl backdrop-blur-sm">
+            ✂
           </div>
 
           <p className="mb-4 text-xs font-semibold tracking-[0.45em] text-[#c9a35b]">
@@ -1402,7 +1298,7 @@ export default function Home() {
 
                   {!availableTimesLoading && !availabilityError && (
                     <>
-                      <div className="mt-4 grid grid-cols-4 gap-2 sm:grid-cols-6 md:grid-cols-8">
+                      <div className="mt-3 grid grid-cols-6 gap-1 sm:grid-cols-8 md:grid-cols-10">
                         {timeSlots.map((time) => {
                           const active = selectedTime === time;
                           const available = availableTimes.includes(time);
@@ -1414,7 +1310,7 @@ export default function Home() {
                               onClick={() => {
                                 if (available) setSelectedTime(time);
                               }}
-                              className={`rounded-lg border px-2 py-2.5 text-xs font-semibold transition ${
+                              className={`min-h-7 rounded-md border px-1 py-1.5 text-[10px] font-semibold leading-none transition ${
                                 !available
                                   ? "cursor-not-allowed border-white/[0.05] bg-white/[0.02] text-white/15 line-through"
                                   : active
@@ -1439,7 +1335,7 @@ export default function Home() {
                   <button
                     onClick={handleTimeContinue}
                     disabled={!selectedTime}
-                    className={`mt-5 w-full rounded-xl py-3.5 text-sm font-bold transition ${
+                    className={`mt-3 w-full rounded-xl py-3 text-sm font-bold transition ${
                       selectedTime
                         ? "bg-[#c9a35b] text-black hover:bg-[#dfbd76]"
                         : "cursor-not-allowed bg-white/5 text-white/20"
@@ -1768,114 +1664,6 @@ export default function Home() {
       id="anasayfa"
       className="relative min-h-screen bg-[#080808] text-white"
     >
-      {publicReviewOpen && (
-        <div
-          className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
-          onClick={() => setPublicReviewOpen(false)}
-        >
-          <div
-            className="w-full max-w-md rounded-3xl border border-[#c9a35b]/25 bg-[#101010] p-5 shadow-2xl md:p-6"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <p className="text-[10px] font-semibold tracking-[0.3em] text-[#c9a35b]">
-                  DEĞERLENDİRME YAP
-                </p>
-                <h3 className="mt-2 text-2xl font-bold">Deneyimini paylaş</h3>
-              </div>
-              <button
-                type="button"
-                onClick={() => setPublicReviewOpen(false)}
-                className="flex h-9 w-9 items-center justify-center rounded-full border border-white/10 text-white/50 transition hover:border-white/25 hover:text-white"
-              >
-                ×
-              </button>
-            </div>
-
-            {publicReviewSent ? (
-              <div className="mt-6">
-                <div className="rounded-2xl border border-[#c9a35b]/25 bg-[#c9a35b]/10 px-4 py-4 text-sm text-[#c9a35b]">
-                  Teşekkürler. Değerlendirmen yayınlandı. ✓
-                </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setPublicReviewOpen(false);
-                    setPublicReviewSent(false);
-                  }}
-                  className="mt-4 w-full rounded-xl bg-[#c9a35b] py-3 font-bold text-black transition hover:bg-[#dfbd76]"
-                >
-                  Kapat
-                </button>
-              </div>
-            ) : (
-              <>
-                <input
-                  value={publicReviewName}
-                  onChange={(event) => setPublicReviewName(event.target.value)}
-                  maxLength={60}
-                  placeholder="Ad Soyad"
-                  className="mt-6 w-full rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white outline-none placeholder:text-white/25 focus:border-[#c9a35b]/50"
-                />
-
-                <div className="mt-4">
-                  <p className="text-xs text-white/35">Puanın</p>
-                  <div className="mt-2 flex gap-2">
-                    {[1, 2, 3, 4, 5].map((star) => (
-                      <button
-                        key={star}
-                        type="button"
-                        onClick={() => setPublicReviewRating(star)}
-                        className={`text-3xl transition ${
-                          star <= publicReviewRating
-                            ? "text-[#c9a35b]"
-                            : "text-white/15"
-                        }`}
-                      >
-                        ★
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <textarea
-                  value={publicReviewComment}
-                  onChange={(event) => setPublicReviewComment(event.target.value)}
-                  maxLength={300}
-                  rows={4}
-                  placeholder="Değerlendirmeni yaz..."
-                  className="mt-4 w-full resize-none rounded-xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white outline-none placeholder:text-white/25 focus:border-[#c9a35b]/50"
-                />
-
-                {publicReviewError && (
-                  <p className="mt-2 text-xs text-red-300">{publicReviewError}</p>
-                )}
-
-                <button
-                  type="button"
-                  onClick={handleSubmitPublicReview}
-                  disabled={
-                    !publicReviewName.trim() ||
-                    !publicReviewComment.trim() ||
-                    publicReviewSaving
-                  }
-                  className={`mt-4 w-full rounded-xl py-3 font-bold transition ${
-                    publicReviewName.trim() &&
-                    publicReviewComment.trim() &&
-                    !publicReviewSaving
-                      ? "bg-[#c9a35b] text-black hover:bg-[#dfbd76]"
-                      : "cursor-not-allowed bg-white/5 text-white/20"
-                  }`}
-                >
-                  {publicReviewSaving ? "Gönderiliyor..." : "Değerlendirmeyi Gönder"}
-                </button>
-              </>
-            )}
-          </div>
-        </div>
-      )}
-
       <div
         className="pointer-events-none fixed inset-0 z-0 bg-cover bg-center bg-no-repeat md:hidden"
         style={{ backgroundImage: "url('/berber-bg-mobile.png')" }}
@@ -2129,25 +1917,14 @@ export default function Home() {
               </h2>
             </div>
 
-            <div className="flex flex-col items-end gap-2 text-right">
-              <button
-                type="button"
-                onClick={() => {
-                  setPublicReviewSent(false);
-                  setPublicReviewError("");
-                  setPublicReviewOpen(true);
-                }}
-                className="rounded-lg border border-[#c9a35b]/45 bg-[#c9a35b]/10 px-3 py-1.5 text-[10px] font-bold text-[#c9a35b] transition hover:bg-[#c9a35b] hover:text-black md:px-4 md:py-2 md:text-xs"
-              >
-                Değerlendirme Yap
-              </button>
+            <div className="text-right">
               <p className="text-[8px] text-white/25">
-                Son {Math.min(reviews.length, 12)} yorum
+                Son {Math.min(reviews.length, 10)} yorum
               </p>
               {reviews.length > 6 && (
                 <div className="mt-1 flex justify-end gap-1">
                   {Array.from({
-                    length: Math.ceil(Math.min(reviews.length, 12) / 6),
+                    length: Math.ceil(Math.min(reviews.length, 10) / 6),
                   }).map((_, index) => (
                     <span
                       key={index}
@@ -2180,7 +1957,7 @@ export default function Home() {
               }`}
             >
               {reviews
-                .slice(0, 12)
+                .slice(0, 10)
                 .slice(reviewPage * 6, reviewPage * 6 + 6)
                 .map((review) => (
                   <div

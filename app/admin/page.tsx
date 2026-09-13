@@ -14,6 +14,7 @@ type Appointment = {
   price_at_booking: number | null;
   is_archived: boolean;
   archived_at: string | null;
+  total_duration_minutes: number | null;
   services: { name: string; price: number | null } | null;
   appointment_services: {
     service_name: string;
@@ -147,6 +148,43 @@ export default function AdminPage() {
     }).format(new Date(value));
   };
 
+  const appointmentDuration = (appointment: Appointment) => {
+    const stored = Number(appointment.total_duration_minutes);
+    if (stored > 0) return stored;
+
+    const snapshotTotal = (appointment.appointment_services ?? []).reduce(
+      (sum, item) => sum + Number(item.duration_minutes || 0),
+      0
+    );
+
+    return snapshotTotal > 0 ? snapshotTotal : business?.appointment_interval ?? 30;
+  };
+
+  const isManualSlotAvailable = (
+    date: string,
+    time: string,
+    duration: number
+  ) => {
+    const start = timeToMinutesAdmin(time);
+    const end = start + duration;
+
+    return !appointments.some((appointment) => {
+      if (
+        appointment.is_archived ||
+        appointment.appointment_date !== date ||
+        ["cancelled", "rejected"].includes(appointment.status)
+      ) {
+        return false;
+      }
+
+      const existingStart = timeToMinutesAdmin(appointment.appointment_time);
+      const existingEnd =
+        existingStart + appointmentDuration(appointment);
+
+      return start < existingEnd && existingStart < end;
+    });
+  };
+
   const loadAppointments = async () => {
     const { data, error } = await supabase
       .from("appointments")
@@ -161,6 +199,7 @@ export default function AdminPage() {
         price_at_booking,
         is_archived,
         archived_at,
+        total_duration_minutes,
         services (name, price),
         appointment_services (
           service_name,
@@ -615,6 +654,20 @@ export default function AdminPage() {
 
     if (!selectedService) {
       showNotice("error", "Bir hizmet seç.");
+      return;
+    }
+
+    if (
+      !isManualSlotAvailable(
+        manualSlot.date,
+        manualSlot.time,
+        selectedService.duration_minutes
+      )
+    ) {
+      showNotice(
+        "error",
+        "Bu saat işlem süresi + 5 dk mola nedeniyle uygun değil."
+      );
       return;
     }
 
@@ -1168,6 +1221,12 @@ export default function AdminPage() {
     year: "numeric",
   })}`;
 
+  // Randevu yönetimi takvimi 15 dakikalık sabit aralıklarla çalışır.
+  const calendarSlots: string[] = [];
+  for (let totalMinutes = 10 * 60; totalMinutes <= 22 * 60; totalMinutes += 15) {
+    calendarSlots.push(minutesToTimeAdmin(totalMinutes));
+  }
+
   return (
     <main className="min-h-screen bg-[#080808] text-white">
       {manualSlot && (
@@ -1613,14 +1672,7 @@ export default function AdminPage() {
                     ))}
                   </div>
 
-                  {Array.from({ length: 25 }, (_, index) => {
-                    const totalMinutes = 10 * 60 + index * 30;
-                    const hour = Math.floor(totalMinutes / 60);
-                    const minute = totalMinutes % 60;
-                    const slot = `${String(hour).padStart(2, "0")}:${String(
-                      minute
-                    ).padStart(2, "0")}`;
-
+                  {calendarSlots.map((slot) => {
                     return (
                       <div
                         key={slot}
@@ -1671,7 +1723,7 @@ export default function AdminPage() {
             )}
 
             <p className="mt-2 text-[10px] text-white/25">
-              Takvim 10:00–22:00 arasında 30 dakikalık randevu aralıklarını gösterir.
+              Takvim 15 dakikalık saat aralıklarıyla çalışır.
             </p>
           </section>
         )}
@@ -2271,6 +2323,17 @@ export default function AdminPage() {
       </div>
     </main>
   );
+}
+
+function timeToMinutesAdmin(time: string) {
+  const [hour, minute] = time.slice(0, 5).split(":").map(Number);
+  return hour * 60 + minute;
+}
+
+function minutesToTimeAdmin(totalMinutes: number) {
+  const hour = Math.floor(totalMinutes / 60);
+  const minute = totalMinutes % 60;
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
 }
 
 const inputClass =

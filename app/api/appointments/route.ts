@@ -399,6 +399,10 @@ export async function GET(request: Request) {
 
     const now = getIstanbulNow();
     const nowMinutes = timeToMinutes(now.time);
+
+    // Randevu başlangıçları business_settings.appointment_interval değerine
+    // göre üretilir. Şu an bu değer 15 dakikadır:
+    // 10:00, 10:15, 10:30, 10:45 ...
     const availableTimes: string[] = [];
 
     for (
@@ -406,9 +410,8 @@ export async function GET(request: Request) {
       start + totalDuration <= closeMinutes;
       start += appointmentInterval
     ) {
-      if (start < openMinutes) {
-        continue;
-      }
+      if (start < openMinutes) continue;
+
       if (
         appointmentDate < now.date ||
         (appointmentDate === now.date && start <= nowMinutes)
@@ -569,6 +572,12 @@ export async function POST(request: Request) {
     const closeMinutes = timeToMinutes(workingHour.close_time);
     const slotAnchorMinutes = timeToMinutes(slotAnchorTime);
 
+    const existingAppointments = await getExistingAppointments(
+      supabaseAdmin,
+      appointmentDate,
+      appointmentInterval
+    );
+
     if (
       requestedMinutes < openMinutes ||
       requestedMinutes + totalDuration > closeMinutes ||
@@ -579,12 +588,6 @@ export async function POST(request: Request) {
         { status: 400 }
       );
     }
-
-    const existingAppointments = await getExistingAppointments(
-      supabaseAdmin,
-      appointmentDate,
-      appointmentInterval
-    );
 
     const overlaps = existingAppointments.some((existing) =>
       rangesOverlap(
