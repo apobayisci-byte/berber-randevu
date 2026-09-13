@@ -95,7 +95,9 @@ function createDateOptions(workingHours: WorkingHour[]): DateOption[] {
     year: "numeric",
   });
 
-  for (let i = 0; i < 14; i++) {
+  // Önümüzdeki 20 açık çalışma gününü göster.
+  // Pazar/kapalı günler sayıya dahil edilmez.
+  for (let i = 0; dates.length < 20 && i < 40; i++) {
     const date = new Date();
     date.setHours(12, 0, 0, 0);
     date.setDate(date.getDate() + i);
@@ -1216,7 +1218,7 @@ export default function Home() {
                               setSelectedDate(date.value);
                               setSelectedTime("");
                             }}
-                            className={`min-w-0 rounded-lg border px-0.5 py-2 text-center transition ${
+                            className={`min-w-0 rounded-md border px-0.5 py-1.5 text-center transition ${
                               active
                                 ? "border-[#c9a35b] bg-[#c9a35b] text-black"
                                 : "border-white/10 bg-[#111]/90 hover:border-[#c9a35b]/40"
@@ -1227,7 +1229,7 @@ export default function Home() {
                             }`}>
                               {date.dayName}
                             </p>
-                            <p className="mt-0.5 text-sm font-bold sm:text-base">
+                            <p className="mt-0.5 text-[13px] font-bold sm:text-sm">
                               {date.dayNumber}
                             </p>
                             <p className={`truncate text-[7px] sm:text-[8px] ${
