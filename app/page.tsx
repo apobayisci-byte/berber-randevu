@@ -678,7 +678,7 @@ export default function Home() {
       }
 
       if (result.review) {
-        setReviews((current) => [result.review as Review, ...current].slice(0, 10));
+        setReviews((current) => [result.review as Review, ...current].slice(0, 12));
       }
 
       setReviewSent(true);
@@ -1921,12 +1921,12 @@ export default function Home() {
 
             <div className="text-right">
               <p className="text-[8px] text-white/25">
-                Son {Math.min(reviews.length, 10)} yorum
+                Son {Math.min(reviews.length, 12)} yorum
               </p>
               {reviews.length > 6 && (
                 <div className="mt-1 flex justify-end gap-1">
                   {Array.from({
-                    length: Math.ceil(Math.min(reviews.length, 10) / 6),
+                    length: Math.ceil(Math.min(reviews.length, 12) / 6),
                   }).map((_, index) => (
                     <span
                       key={index}
@@ -1959,7 +1959,7 @@ export default function Home() {
               }`}
             >
               {reviews
-                .slice(0, 10)
+                .slice(0, 12)
                 .slice(reviewPage * 6, reviewPage * 6 + 6)
                 .map((review) => (
                   <div
