@@ -66,12 +66,27 @@ type SpecialWorkingHour = {
   close_time: string | null;
 };
 
+type ErrorLog = {
+  id: number;
+  endpoint: string;
+  stage: string;
+  http_status: number;
+  error_code: string | null;
+  customer_message: string;
+  technical_message: string | null;
+  appointment_date: string | null;
+  appointment_time: string | null;
+  service_ids: number[] | null;
+  metadata: Record<string, unknown> | null;
+  created_at: string;
+};
 
 type Tab =
   | "appointments"
   | "statistics"
   | "history"
   | "logs"
+  | "errors"
   | "services"
   | "hours"
   | "availability"
@@ -104,6 +119,7 @@ export default function AdminPage() {
 
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [activityLogs, setActivityLogs] = useState<ActivityLog[]>([]);
+  const [errorLogs, setErrorLogs] = useState<ErrorLog[]>([]);
   const [services, setServices] = useState<Service[]>([]);
   const [workingHours, setWorkingHours] = useState<WorkingHour[]>([]);
   const [business, setBusiness] = useState<BusinessSettings | null>(null);
@@ -237,6 +253,21 @@ export default function AdminPage() {
     setActivityLogs((data ?? []) as ActivityLog[]);
   };
 
+  const loadErrorLogs = async () => {
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+    const { data, error } = await supabase
+      .from("error_logs")
+      .select("id,endpoint,stage,http_status,error_code,customer_message,technical_message,appointment_date,appointment_time,service_ids,metadata,created_at")
+      .gte("created_at", sevenDaysAgo.toISOString())
+      .order("created_at", { ascending: false })
+      .limit(500);
+
+    if (error) throw error;
+    setErrorLogs((data ?? []) as ErrorLog[]);
+  };
+
   const loadSettings = async () => {
     const [servicesResult, hoursResult, businessResult, specialHoursResult] = await Promise.all([
       supabase
@@ -279,6 +310,7 @@ export default function AdminPage() {
       await Promise.all([
         loadAppointments(),
         loadActivityLogs(),
+        loadErrorLogs(),
         loadSettings(),
       ]);
     } catch (err) {
@@ -524,6 +556,7 @@ export default function AdminPage() {
     setLoggedIn(false);
     setAppointments([]);
     setActivityLogs([]);
+    setErrorLogs([]);
     setServices([]);
     setWorkingHours([]);
     setSpecialWorkingHours([]);
@@ -1770,6 +1803,12 @@ export default function AdminPage() {
             İşlem Geçmişi
           </TabButton>
           <TabButton
+            active={activeTab === "errors"}
+            onClick={() => setActiveTab("errors")}
+          >
+            Hata Logları{errorLogs.length > 0 ? ` (${errorLogs.length})` : ""}
+          </TabButton>
+          <TabButton
             active={activeTab === "services"}
             onClick={() => setActiveTab("services")}
           >
@@ -1914,42 +1953,41 @@ export default function AdminPage() {
                     ))}
                   </div>
 
-                  {calendarSlots.map((slot) => {
-                    return (
+                  <div className="relative">
+                    {calendarSlots.map((slot) => (
                       <div
                         key={slot}
                         className="grid grid-cols-[38px_repeat(6,minmax(0,1fr))] border-b border-white/[0.07] last:border-b-0 sm:grid-cols-[54px_repeat(6,minmax(0,1fr))] lg:grid-cols-[62px_repeat(6,minmax(0,1fr))]"
                       >
-                        <div className="flex min-h-[34px] items-center justify-center border-r border-white/10 bg-[#101010] px-0.5 text-[7px] font-bold text-[#c9a35b] sm:min-h-[40px] sm:px-1 sm:text-[9px] lg:min-h-[44px] lg:text-[10px]">
+                        <div className="flex h-[44px] items-center justify-center border-r border-white/10 bg-[#101010] px-1 text-[9px] font-bold text-[#c9a35b] lg:text-[10px]">
                           {slot}
                         </div>
 
                         {calendarDays.map((day) => {
-                          const appointment = day.appointments.find(
-                            (item) =>
-                              item.appointment_time.slice(0, 5) === slot &&
-                              !["cancelled", "rejected"].includes(item.status)
-                          );
+                          const slotMinutes = timeToMinutesAdmin(slot);
+                          const occupied = day.appointments.some((appointment) => {
+                            if (
+                              appointment.is_archived ||
+                              ["cancelled", "rejected"].includes(appointment.status)
+                            ) return false;
+
+                            const appointmentStart = timeToMinutesAdmin(appointment.appointment_time);
+                            const appointmentEnd = appointmentStart + appointmentDuration(appointment);
+                            return slotMinutes >= appointmentStart && slotMinutes < appointmentEnd;
+                          });
 
                           return (
                             <div
                               key={`${day.key}-${slot}`}
-                              className={`min-h-[34px] min-w-0 overflow-hidden border-r border-white/[0.07] px-0.5 py-0.5 last:border-r-0 sm:min-h-[40px] sm:px-1 sm:py-1 lg:min-h-[44px] ${
-                                day.key === todayKey
-                                  ? "bg-[#c9a35b]/[0.025]"
-                                  : ""
+                              className={`h-[44px] border-r border-white/[0.07] last:border-r-0 ${
+                                day.key === todayKey ? "bg-[#c9a35b]/[0.025]" : ""
                               }`}
                             >
-                              {appointment ? (
-                                <TimetableAppointment
-                                  appointment={appointment}
-                                  onClick={() => setSelectedAppointment(appointment)}
-                                />
-                              ) : (
+                              {!occupied && (
                                 <button
                                   type="button"
                                   onClick={() => openManualAppointment(day.key, slot)}
-                                  className="group flex h-full min-h-[30px] w-full items-center justify-center gap-1 text-white/15 transition hover:bg-[#c9a35b]/[0.06] hover:text-[#c9a35b] sm:min-h-[34px]"
+                                  className="group flex h-[44px] w-full items-center justify-center gap-1 text-white/15 transition hover:bg-[#c9a35b]/[0.06] hover:text-[#c9a35b]"
                                   title={`${formatDate(day.key)} ${slot} saatine müşteri ekle`}
                                 >
                                   <span className="text-[11px] font-semibold sm:text-sm">+</span>
@@ -1960,8 +1998,59 @@ export default function AdminPage() {
                           );
                         })}
                       </div>
-                    );
-                  })}
+                    ))}
+
+                    <div className="pointer-events-none absolute inset-0 grid grid-cols-[38px_repeat(6,minmax(0,1fr))] sm:grid-cols-[54px_repeat(6,minmax(0,1fr))] lg:grid-cols-[62px_repeat(6,minmax(0,1fr))]">
+                      <div />
+                      {calendarDays.map((day) => (
+                        <div key={`appointments-${day.key}`} className="relative">
+                          {day.appointments
+                            .filter(
+                              (appointment) =>
+                                !appointment.is_archived &&
+                                !["cancelled", "rejected"].includes(appointment.status)
+                            )
+                            .map((appointment) => {
+                              const firstMinute = timeToMinutesAdmin(calendarSlots[0]);
+                              const startMinute = timeToMinutesAdmin(appointment.appointment_time);
+                              const duration = appointmentDuration(appointment);
+                              // Satırın 44px yüksekliğine 1px alt border da dahil olduğu için
+                              // gerçek dikey adım 45px. Overlay hesabı da aynı değeri kullanmalı.
+                              const rowHeight = 45;
+                              const top = ((startMinute - firstMinute) / 15) * rowHeight;
+                              const height = Math.max((duration / 15) * rowHeight, rowHeight);
+
+                              if (top < 0 || top >= calendarSlots.length * rowHeight) return null;
+
+                              return (
+                                <button
+                                  key={appointment.id}
+                                  type="button"
+                                  onClick={() => setSelectedAppointment(appointment)}
+                                  className="pointer-events-auto absolute left-1 right-1 z-10 flex overflow-hidden rounded-md border border-[#c9a35b]/35 bg-[#17150f] px-2.5 text-left shadow-lg transition hover:border-[#c9a35b]/60 hover:bg-[#1d1a12]"
+                                  style={{
+                                    top: `${top + 5}px`,
+                                    height: `${Math.max(height - 10, 34)}px`,
+                                  }}
+                                >
+                                  <div className="my-auto min-w-0 w-full">
+                                    <p className="truncate text-[8px] font-bold leading-tight text-white sm:text-[9px] lg:text-[10px]">
+                                      {appointment.customer_name}
+                                    </p>
+                                    <p className="mt-0.5 truncate text-[7px] font-semibold leading-tight text-emerald-300 sm:text-[8px] lg:text-[9px]">
+                                      {appointment.customer_phone}
+                                    </p>
+                                    <p className="mt-1 truncate text-[6px] leading-tight text-white/45 sm:text-[7px] lg:text-[8px]">
+                                      {getAppointmentServicesText(appointment)} • {duration} dk
+                                    </p>
+                                  </div>
+                                </button>
+                              );
+                            })}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 </div>
               </div>
             )}
@@ -2109,6 +2198,83 @@ export default function AdminPage() {
                     <p className="shrink-0 text-xs text-white/35">
                       {formatLogDate(log.created_at)}
                     </p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+        )}
+
+        {activeTab === "errors" && (
+          <section className="mt-6">
+            <div className="flex items-end justify-between gap-4">
+              <SectionTitle
+                eyebrow="SİSTEM TAKİBİ"
+                title="Hata Logları"
+                description="Müşteri sitesinde son 7 gün içinde oluşan gerçek teknik hatalar burada günlük olarak görünür. Müşteri adı, telefon numarası veya gizli anahtarlar kaydedilmez."
+              />
+              <button
+                onClick={loadErrorLogs}
+                className="shrink-0 rounded-xl border border-white/10 px-4 py-3 text-sm text-white/60 hover:text-white"
+              >
+                Yenile
+              </button>
+            </div>
+
+            {errorLogs.length === 0 ? (
+              <div className="mt-8 rounded-2xl border border-emerald-500/15 bg-emerald-500/5 p-8 text-center text-emerald-300/70">
+                Son 7 günde kaydedilmiş teknik hata yok.
+              </div>
+            ) : (
+              <div className="mt-7 space-y-6">
+                {Object.entries(
+                  errorLogs.reduce<Record<string, ErrorLog[]>>((groups, log) => {
+                    const day = localDateKey(new Date(log.created_at));
+                    (groups[day] ??= []).push(log);
+                    return groups;
+                  }, {})
+                ).map(([day, logs]) => (
+                  <div key={day} className="overflow-hidden rounded-2xl border border-red-500/15 bg-[#101010]">
+                    <div className="flex items-center justify-between border-b border-white/10 bg-red-500/5 px-5 py-4">
+                      <div>
+                        <p className="font-semibold text-white">{formatDate(day)}</p>
+                        <p className="mt-1 text-xs text-white/35">{logs.length} hata kaydı</p>
+                      </div>
+                      <span className="rounded-full border border-red-500/20 bg-red-500/10 px-3 py-1 text-xs text-red-300">
+                        Teknik Hata
+                      </span>
+                    </div>
+
+                    {logs.map((log, index) => (
+                      <div
+                        key={log.id}
+                        className={`p-5 ${index !== logs.length - 1 ? "border-b border-white/10" : ""}`}
+                      >
+                        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                          <div className="min-w-0">
+                            <p className="font-medium text-red-200">{log.customer_message}</p>
+                            <p className="mt-2 break-words text-sm text-white/55">
+                              {log.technical_message || "Teknik detay bulunmuyor."}
+                            </p>
+                          </div>
+                          <p className="shrink-0 text-xs text-white/35">{formatLogDate(log.created_at)}</p>
+                        </div>
+
+                        <div className="mt-4 grid gap-2 text-xs sm:grid-cols-2 lg:grid-cols-4">
+                          <Info label="Aşama" value={log.stage} />
+                          <Info label="HTTP / Kod" value={`${log.http_status}${log.error_code ? ` • ${log.error_code}` : ""}`} />
+                          <Info label="Randevu" value={log.appointment_date ? `${formatDate(log.appointment_date)}${log.appointment_time ? ` • ${log.appointment_time.slice(0, 5)}` : ""}` : "-"} />
+                          <Info label="Hizmet ID" value={log.service_ids?.length ? log.service_ids.join(", ") : "-"} />
+                        </div>
+
+                        <details className="mt-3 rounded-xl border border-white/10 bg-black/20 p-3">
+                          <summary className="cursor-pointer text-xs font-semibold text-[#c9a35b]">Ayrıntılı teknik kayıt</summary>
+                          <pre className="mt-3 overflow-x-auto whitespace-pre-wrap break-words text-[11px] leading-5 text-white/45">
+                            {JSON.stringify({ endpoint: log.endpoint, stage: log.stage, metadata: log.metadata }, null, 2)}
+                          </pre>
+                        </details>
+                      </div>
+                    ))}
                   </div>
                 ))}
               </div>

@@ -120,6 +120,45 @@ async function createAdminClient() {
   });
 }
 
+async function writeErrorLog(
+  supabaseAdmin: SupabaseClient<any, "public", any> | null,
+  log: {
+    endpoint: string;
+    stage: string;
+    httpStatus: number;
+    errorCode?: string | null;
+    customerMessage: string;
+    technicalMessage?: string | null;
+    appointmentDate?: string | null;
+    appointmentTime?: string | null;
+    serviceIds?: number[] | null;
+    metadata?: Record<string, unknown> | null;
+  }
+) {
+  if (!supabaseAdmin) return;
+
+  try {
+    const { error } = await supabaseAdmin.from("error_logs").insert({
+      endpoint: log.endpoint,
+      stage: log.stage,
+      http_status: log.httpStatus,
+      error_code: log.errorCode ?? null,
+      customer_message: log.customerMessage,
+      technical_message: log.technicalMessage ?? null,
+      appointment_date: log.appointmentDate ?? null,
+      appointment_time: log.appointmentTime ?? null,
+      service_ids: log.serviceIds ?? null,
+      metadata: log.metadata ?? {},
+    });
+
+    if (error) {
+      console.error("Hata logu kaydedilemedi:", error);
+    }
+  } catch (logError) {
+    console.error("Hata logu yazılırken ek hata oluştu:", logError);
+  }
+}
+
 async function getServices(
   supabaseAdmin: SupabaseClient<any, "public", any>,
   serviceIds: number[]
@@ -448,8 +487,14 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
+  let logAdmin: SupabaseClient<any, "public", any> | null = null;
+  let logAppointmentDate: string | null = null;
+  let logAppointmentTime: string | null = null;
+  let logServiceIds: number[] = [];
+
   try {
     const supabaseAdmin = await createAdminClient();
+    logAdmin = supabaseAdmin;
 
     if (!supabaseAdmin) {
       return NextResponse.json(
@@ -467,6 +512,10 @@ export async function POST(request: Request) {
     const appointmentDate = body.appointment_date?.trim() ?? "";
     const appointmentTime =
       body.appointment_time?.trim().slice(0, 5) ?? "";
+
+    logAppointmentDate = appointmentDate || null;
+    logAppointmentTime = appointmentTime || null;
+    logServiceIds = serviceIds;
 
     if (
       serviceIds.length === 0 ||
@@ -654,6 +703,25 @@ export async function POST(request: Request) {
         );
       }
 
+      await writeErrorLog(supabaseAdmin, {
+        endpoint: "/api/appointments",
+        stage: "create_appointment_atomic",
+        httpStatus: 500,
+        errorCode: atomicError.code ?? "ATOMIC_ERROR",
+        customerMessage: "Randevu şu anda oluşturulamadı. Lütfen tekrar deneyin.",
+        technicalMessage: [atomicError.message, atomicError.details, atomicError.hint]
+          .filter(Boolean)
+          .join(" | "),
+        appointmentDate,
+        appointmentTime,
+        serviceIds,
+        metadata: {
+          total_duration_minutes: totalDuration,
+          appointment_interval: appointmentInterval,
+          service_count: services.length,
+        },
+      });
+
       return NextResponse.json(
         {
           error:
@@ -670,6 +738,19 @@ export async function POST(request: Request) {
         "Atomik randevu fonksiyonu geçersiz ID döndürdü:",
         appointmentIdData
       );
+
+      await writeErrorLog(supabaseAdmin, {
+        endpoint: "/api/appointments",
+        stage: "invalid_appointment_id",
+        httpStatus: 500,
+        errorCode: "INVALID_APPOINTMENT_ID",
+        customerMessage: "Randevu şu anda oluşturulamadı. Lütfen tekrar deneyin.",
+        technicalMessage: `RPC geçersiz randevu ID döndürdü: ${String(appointmentIdData)}`,
+        appointmentDate,
+        appointmentTime,
+        serviceIds,
+        metadata: { returned_value_type: typeof appointmentIdData },
+      });
 
       return NextResponse.json(
         {
@@ -697,6 +778,23 @@ export async function POST(request: Request) {
     );
   } catch (error) {
     console.error("Appointment API hatası:", error);
+
+    const technicalMessage =
+      error instanceof Error ? error.message : String(error);
+
+    await writeErrorLog(logAdmin, {
+      endpoint: "/api/appointments",
+      stage: "post_unhandled_exception",
+      httpStatus: 500,
+      errorCode: "UNHANDLED_EXCEPTION",
+      customerMessage:
+        "Beklenmeyen bir sunucu hatası oluştu. Lütfen tekrar deneyin.",
+      technicalMessage,
+      appointmentDate: logAppointmentDate,
+      appointmentTime: logAppointmentTime,
+      serviceIds: logServiceIds,
+      metadata: { error_type: error instanceof Error ? error.name : typeof error },
+    });
 
     return NextResponse.json(
       {
