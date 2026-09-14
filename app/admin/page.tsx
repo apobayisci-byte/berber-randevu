@@ -2436,9 +2436,9 @@ export default function AdminPage() {
                                       : "border-[#c9a35b]/45 bg-[#17150f] hover:border-[#c9a35b]/70 hover:bg-[#1d1a12]"
                                   }`}
                                   style={{
-                                    top: `calc(${topPercent}% + 4px)`,
-                                    height: `calc(${heightPercent}% - 8px)`,
-                                    minHeight: "37px",
+                                    top: `calc(${topPercent}% + 6px)`,
+                                    height: `calc(${heightPercent}% - 12px)`,
+                                    minHeight: "33px",
                                   }}
                                 >
                                   <div className="my-auto min-w-0 w-full overflow-hidden py-0.5">
