@@ -288,28 +288,120 @@ export async function GET(request: Request) {
       `${String(targetHour).padStart(2, "0")}:` +
       `${String(targetMinute).padStart(2, "0")}`;
 
-    const {
-      data: appointmentsData,
-      error: appointmentsError,
-    } = await supabase
-      .from("appointments")
-      .select(`
-        id,
-        customer_name,
-        appointment_date,
-        appointment_time,
-        status,
-        appointment_services (
-          service_name
-        )
-      `)
-      .eq("appointment_date", targetDate)
-      .eq("appointment_time", `${targetTime}:00`)
-      .not(
-        "status",
-        "in",
-        '("cancelled","rejected")'
-      );
+    /*
+     * Cron/Vercel çağrısı tek bir dakikada timeout olursa randevu
+     * kaçmasın diye son 3 dakikalık hedefleri de kontrol ediyoruz.
+     *
+     * Örnek:
+     * 11:50 çağrısı timeout oldu ve 12:00 randevusunu kaçırdıysa,
+     * 11:51 -> 11:58-12:01 aralığını kontrol eder ve 12:00'ı yakalar.
+     *
+     * appointment_reminder_logs aynı randevu/saat için tekrar
+     * bildirim gönderilmesini engellemeye devam eder.
+     */
+    const windowStartMinutes = currentMinutes + 7;
+    const windowEndMinutes = currentMinutes + 10;
+
+    function toDateAndTime(totalMinutes: number) {
+      let minutes = totalMinutes;
+      let date = now.date;
+
+      if (minutes >= 24 * 60) {
+        minutes -= 24 * 60;
+        date = getTomorrowDate(now.date);
+      }
+
+      const hour = Math.floor(minutes / 60);
+      const minute = minutes % 60;
+
+      return {
+        date,
+        time:
+          `${String(hour).padStart(2, "0")}:` +
+          `${String(minute).padStart(2, "0")}:00`,
+      };
+    }
+
+    const windowStart = toDateAndTime(windowStartMinutes);
+    const windowEnd = toDateAndTime(windowEndMinutes);
+
+    let appointmentsData: unknown[] | null = null;
+    let appointmentsError: unknown = null;
+
+    if (windowStart.date === windowEnd.date) {
+      const result = await supabase
+        .from("appointments")
+        .select(`
+          id,
+          customer_name,
+          appointment_date,
+          appointment_time,
+          status,
+          appointment_services (
+            service_name
+          )
+        `)
+        .eq("appointment_date", windowStart.date)
+        .gte("appointment_time", windowStart.time)
+        .lte("appointment_time", windowEnd.time)
+        .not(
+          "status",
+          "in",
+          '("cancelled","rejected")'
+        );
+
+      appointmentsData = result.data;
+      appointmentsError = result.error;
+    } else {
+      const [todayResult, tomorrowResult] = await Promise.all([
+        supabase
+          .from("appointments")
+          .select(`
+            id,
+            customer_name,
+            appointment_date,
+            appointment_time,
+            status,
+            appointment_services (
+              service_name
+            )
+          `)
+          .eq("appointment_date", windowStart.date)
+          .gte("appointment_time", windowStart.time)
+          .not(
+            "status",
+            "in",
+            '("cancelled","rejected")'
+          ),
+        supabase
+          .from("appointments")
+          .select(`
+            id,
+            customer_name,
+            appointment_date,
+            appointment_time,
+            status,
+            appointment_services (
+              service_name
+            )
+          `)
+          .eq("appointment_date", windowEnd.date)
+          .lte("appointment_time", windowEnd.time)
+          .not(
+            "status",
+            "in",
+            '("cancelled","rejected")'
+          ),
+      ]);
+
+      appointmentsError =
+        todayResult.error || tomorrowResult.error;
+
+      appointmentsData = [
+        ...(todayResult.data ?? []),
+        ...(tomorrowResult.data ?? []),
+      ];
+    }
 
     if (appointmentsError) {
       console.error(
@@ -337,6 +429,10 @@ export async function GET(request: Request) {
 
         target:
           `${targetDate} ${targetTime}`,
+
+        window:
+          `${windowStart.date} ${windowStart.time.slice(0, 5)} - ` +
+          `${windowEnd.date} ${windowEnd.time.slice(0, 5)}`,
 
         appointments: 0,
         notificationsSent: 0,
@@ -594,6 +690,10 @@ export async function GET(request: Request) {
 
       target:
         `${targetDate} ${targetTime}`,
+
+      window:
+        `${windowStart.date} ${windowStart.time.slice(0, 5)} - ` +
+        `${windowEnd.date} ${windowEnd.time.slice(0, 5)}`,
 
       appointments:
         appointments.length,
