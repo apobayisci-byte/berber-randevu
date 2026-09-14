@@ -1742,9 +1742,13 @@ export default function AdminPage() {
               <div className="mt-5 rounded-xl border border-red-500/20 bg-red-500/[0.06] px-4 py-3 text-center text-sm font-bold text-red-300">
                 İPTAL EDİLDİ
               </div>
+            ) : selectedAppointment.status === "completed" ? (
+              <div className="mt-5 rounded-xl border border-emerald-500/35 bg-emerald-500/[0.07] px-4 py-3 text-center text-sm font-bold text-emerald-300">
+                ✓ TAMAMLANDI
+              </div>
             ) : selectedAppointment.customer_note ===
               "Admin panelinden manuel eklendi." ? (
-              <div className="mt-5 grid grid-cols-2 gap-2">
+              <div className="mt-5 grid grid-cols-4 gap-2">
                 <button
                   type="button"
                   disabled={updatingId !== null}
@@ -1752,6 +1756,21 @@ export default function AdminPage() {
                   className="rounded-xl border border-[#c9a35b]/30 bg-[#c9a35b]/[0.08] px-4 py-3 text-sm font-semibold text-[#dfbd76] disabled:opacity-40"
                 >
                   Taşı
+                </button>
+                <button
+                  type="button"
+                  disabled={updatingId !== null}
+                  onClick={async () => {
+                    await updateStatus(selectedAppointment.id, "completed");
+                    setSelectedAppointment((current) =>
+                      current ? { ...current, status: "completed" } : current
+                    );
+                  }}
+                  className="rounded-xl border border-emerald-500/35 bg-emerald-500/[0.08] px-2 py-3 text-xs font-semibold text-emerald-300 disabled:opacity-40"
+                >
+                  {updatingId === selectedAppointment.id
+                    ? "İşleniyor..."
+                    : "Tamamlandı"}
                 </button>
                 <button
                   type="button"
@@ -1784,6 +1803,21 @@ export default function AdminPage() {
                   className="rounded-xl border border-[#c9a35b]/30 bg-[#c9a35b]/[0.08] px-2 py-3 text-xs font-semibold text-[#dfbd76] disabled:opacity-40"
                 >
                   Taşı
+                </button>
+                <button
+                  type="button"
+                  disabled={updatingId !== null}
+                  onClick={async () => {
+                    await updateStatus(selectedAppointment.id, "completed");
+                    setSelectedAppointment((current) =>
+                      current ? { ...current, status: "completed" } : current
+                    );
+                  }}
+                  className="rounded-xl border border-emerald-500/35 bg-emerald-500/[0.08] px-2 py-3 text-xs font-semibold text-emerald-300 disabled:opacity-40"
+                >
+                  {updatingId === selectedAppointment.id
+                    ? "İşleniyor..."
+                    : "Tamamlandı"}
                 </button>
                 <button
                   type="button"
@@ -2156,7 +2190,11 @@ export default function AdminPage() {
                                   key={appointment.id}
                                   type="button"
                                   onClick={() => setSelectedAppointment(appointment)}
-                                  className="pointer-events-auto absolute left-0.5 right-0.5 z-10 flex overflow-hidden rounded-md border border-[#c9a35b]/35 bg-[#17150f] px-1 sm:px-1.5 lg:px-2.5 text-left shadow-lg transition hover:border-[#c9a35b]/60 hover:bg-[#1d1a12]"
+                                  className={`pointer-events-auto absolute left-0.5 right-0.5 z-10 flex overflow-hidden rounded-md border px-1 sm:px-1.5 lg:px-2.5 text-left shadow-lg transition ${
+                                    appointment.status === "completed"
+                                      ? "border-emerald-500/65 bg-emerald-500/[0.10] hover:border-emerald-400/80 hover:bg-emerald-500/[0.14]"
+                                      : "border-[#c9a35b]/35 bg-[#17150f] hover:border-[#c9a35b]/60 hover:bg-[#1d1a12]"
+                                  }`}
                                   style={{
                                     top: `${top + (height - visualHeight) / 2}px`,
                                     height: `${visualHeight}px`,
@@ -2172,6 +2210,11 @@ export default function AdminPage() {
                                     <p className="mt-0.5 whitespace-nowrap text-[4px] leading-[6px] text-white/55 sm:text-[6px] sm:leading-[8px] lg:text-[7px] lg:leading-[9px]">
                                       {getAppointmentServicesText(appointment)} • {duration} dk
                                     </p>
+                                    {appointment.status === "completed" && (
+                                      <p className="mt-0.5 whitespace-nowrap text-[4px] font-bold leading-[6px] text-emerald-300 sm:text-[6px] sm:leading-[8px] lg:text-[7px] lg:leading-[9px]">
+                                        ✓ Tamamlandı
+                                      </p>
+                                    )}
                                   </div>
                                 </button>
                               );
@@ -2897,6 +2940,7 @@ function TimetableAppointment({
 }) {
   const service = getAppointmentServicesText(appointment);
   const cancelled = appointment.status === "cancelled";
+  const completed = appointment.status === "completed";
 
   return (
     <button
@@ -2905,12 +2949,19 @@ function TimetableAppointment({
       className={`block w-full min-w-0 overflow-hidden rounded-[4px] border px-0.5 py-0.5 text-left sm:rounded-md sm:px-1 lg:px-1.5 lg:py-1 ${
         cancelled
           ? "border-red-500/15 bg-red-500/[0.035] opacity-55"
+          : completed
+          ? "border-emerald-500/45 bg-emerald-500/[0.08]"
           : "border-[#c9a35b]/20 bg-[#c9a35b]/[0.055]"
       }`}
     >
       {cancelled && (
         <p className="truncate text-[4px] font-black leading-[6px] text-red-300 sm:text-[6px] sm:leading-3 lg:text-[7px]">
           İPTAL
+        </p>
+      )}
+      {completed && (
+        <p className="truncate text-[4px] font-black leading-[6px] text-emerald-300 sm:text-[6px] sm:leading-3 lg:text-[7px]">
+          ✓ TAMAMLANDI
         </p>
       )}
       <p
@@ -2922,7 +2973,11 @@ function TimetableAppointment({
       </p>
       <p
         className={`truncate text-[4px] leading-[6px] sm:text-[6px] sm:leading-3 lg:text-[7px] ${
-          cancelled ? "text-white/25 line-through" : "text-emerald-300"
+          cancelled
+            ? "text-white/25 line-through"
+            : completed
+            ? "text-emerald-300"
+            : "text-emerald-300"
         }`}
       >
         {appointment.customer_phone}
