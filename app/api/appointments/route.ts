@@ -221,38 +221,6 @@ async function getDayConfiguration(
     return null;
   }
 
-  // Sadece seçilen tarihte özel bir kayıt varsa normal planın üzerine yaz.
-  const { data: specialHour, error: specialHourError } = await supabaseAdmin
-    .from("special_working_hours")
-    .select("work_date, is_open, open_time, close_time")
-    .eq("work_date", appointmentDate)
-    .maybeSingle();
-
-  if (specialHourError) {
-    // Özel plan okunamazsa bütün günleri kapatmak yerine normal haftalık
-    // çalışma düzenine güvenli biçimde geri dön.
-    console.error("Özel çalışma planı okunamadı:", specialHourError);
-  } else if (specialHour) {
-    if (
-      !specialHour.is_open ||
-      !specialHour.open_time ||
-      !specialHour.close_time
-    ) {
-      return null;
-    }
-
-    return {
-      workingHour: {
-        is_open: true,
-        open_time: specialHour.open_time,
-        close_time: specialHour.close_time,
-      },
-      slotAnchorTime:
-        workingHourResult.data?.open_time ?? specialHour.open_time,
-      appointmentInterval,
-    };
-  }
-
   const workingHour = workingHourResult.data;
 
   if (
@@ -293,6 +261,23 @@ async function getExistingAppointments(
       Number(appointment.total_duration_minutes) > 0
         ? Number(appointment.total_duration_minutes)
         : fallbackDuration,
+  }));
+}
+
+async function getBlockedTimeRanges(
+  supabaseAdmin: SupabaseClient<any, "public", any>,
+  appointmentDate: string
+) {
+  const { data, error } = await supabaseAdmin
+    .from("blocked_time_ranges")
+    .select("start_time, end_time")
+    .eq("block_date", appointmentDate);
+
+  if (error) throw new Error(`BLOCKED_RANGES:${error.message}`);
+
+  return (data ?? []).map((item) => ({
+    start: timeToMinutes(item.start_time),
+    end: timeToMinutes(item.end_time),
   }));
 }
 
@@ -435,6 +420,10 @@ export async function GET(request: Request) {
       appointmentDate,
       appointmentInterval
     );
+    const blockedRanges = await getBlockedTimeRanges(
+      supabaseAdmin,
+      appointmentDate
+    );
 
     const now = getIstanbulNow();
     const nowMinutes = timeToMinutes(now.time);
@@ -467,7 +456,11 @@ export async function GET(request: Request) {
         )
       );
 
-      if (!overlaps) {
+      const blocked = blockedRanges.some((range) =>
+        start < range.end && range.start < start + totalDuration
+      );
+
+      if (!overlaps && !blocked) {
         availableTimes.push(minutesToTime(start));
       }
     }
@@ -626,6 +619,10 @@ export async function POST(request: Request) {
       appointmentDate,
       appointmentInterval
     );
+    const blockedRanges = await getBlockedTimeRanges(
+      supabaseAdmin,
+      appointmentDate
+    );
 
     if (
       requestedMinutes < openMinutes ||
@@ -635,6 +632,18 @@ export async function POST(request: Request) {
       return NextResponse.json(
         { error: "Seçilen saat bu hizmetler için uygun değil." },
         { status: 400 }
+      );
+    }
+
+    const blocked = blockedRanges.some((range) =>
+      requestedMinutes < range.end &&
+      range.start < requestedMinutes + totalDuration
+    );
+
+    if (blocked) {
+      return NextResponse.json(
+        { error: "Seçilen saat işletme tarafından kapatıldı.", code: "SLOT_BLOCKED" },
+        { status: 409 }
       );
     }
 

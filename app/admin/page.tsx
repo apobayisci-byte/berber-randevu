@@ -60,12 +60,11 @@ type ActivityLog = {
   created_at: string;
 };
 
-type SpecialWorkingHour = {
+type BlockedTimeRange = {
   id: number;
-  work_date: string;
-  is_open: boolean;
-  open_time: string | null;
-  close_time: string | null;
+  block_date: string;
+  start_time: string;
+  end_time: string;
 };
 
 type ErrorLog = {
@@ -91,7 +90,6 @@ type Tab =
   | "errors"
   | "services"
   | "hours"
-  | "availability"
   | "business";
 
 export default function AdminPage() {
@@ -130,11 +128,11 @@ export default function AdminPage() {
   const [services, setServices] = useState<Service[]>([]);
   const [workingHours, setWorkingHours] = useState<WorkingHour[]>([]);
   const [business, setBusiness] = useState<BusinessSettings | null>(null);
-  const [specialWorkingHours, setSpecialWorkingHours] = useState<SpecialWorkingHour[]>([]);
-  const [specialDate, setSpecialDate] = useState("");
-  const [specialIsOpen, setSpecialIsOpen] = useState(true);
-  const [specialOpenTime, setSpecialOpenTime] = useState("10:00");
-  const [specialCloseTime, setSpecialCloseTime] = useState("20:00");
+  const [blockedTimeRanges, setBlockedTimeRanges] = useState<BlockedTimeRange[]>([]);
+  const [blockDay, setBlockDay] = useState<string | null>(null);
+  const [blockStartTime, setBlockStartTime] = useState("15:00");
+  const [blockEndTime, setBlockEndTime] = useState("17:00");
+  const [blockSaving, setBlockSaving] = useState(false);
 
   const [notice, setNotice] = useState<{
     type: "success" | "error";
@@ -196,6 +194,13 @@ export default function AdminPage() {
   ) => {
     const start = timeToMinutesAdmin(time);
     const end = start + duration;
+
+    const blocked = blockedTimeRanges.some((item) =>
+      item.block_date === date &&
+      start < timeToMinutesAdmin(item.end_time) &&
+      timeToMinutesAdmin(item.start_time) < end
+    );
+    if (blocked) return false;
 
     return !appointments.some((appointment) => {
       if (
@@ -278,7 +283,7 @@ export default function AdminPage() {
   };
 
   const loadSettings = async () => {
-    const [servicesResult, hoursResult, businessResult, specialHoursResult] = await Promise.all([
+    const [servicesResult, hoursResult, businessResult, blockedRangesResult] = await Promise.all([
       supabase
         .from("services")
         .select("id,name,price,duration_minutes,is_active,sort_order")
@@ -293,21 +298,22 @@ export default function AdminPage() {
         .limit(1)
         .single(),
       supabase
-        .from("special_working_hours")
-        .select("id,work_date,is_open,open_time,close_time")
-        .order("work_date", { ascending: true }),
+        .from("blocked_time_ranges")
+        .select("id,block_date,start_time,end_time")
+        .order("block_date", { ascending: true })
+        .order("start_time", { ascending: true }),
     ]);
 
     if (servicesResult.error) throw servicesResult.error;
     if (hoursResult.error) throw hoursResult.error;
     if (businessResult.error) throw businessResult.error;
-    if (specialHoursResult.error) throw specialHoursResult.error;
+    if (blockedRangesResult.error) throw blockedRangesResult.error;
 
     setServices((servicesResult.data ?? []) as Service[]);
     setWorkingHours((hoursResult.data ?? []) as WorkingHour[]);
     setBusiness(businessResult.data as BusinessSettings);
-    setSpecialWorkingHours(
-      (specialHoursResult.data ?? []) as SpecialWorkingHour[]
+    setBlockedTimeRanges(
+      (blockedRangesResult.data ?? []) as BlockedTimeRange[]
     );
   };
 
@@ -568,7 +574,7 @@ export default function AdminPage() {
     setErrorLogs([]);
     setServices([]);
     setWorkingHours([]);
-    setSpecialWorkingHours([]);
+    setBlockedTimeRanges([]);
     setBusiness(null);
   };
 
@@ -946,15 +952,6 @@ export default function AdminPage() {
   };
 
   const getDateSchedule = (date: string) => {
-    const special = specialWorkingHours.find((item) => item.work_date === date);
-    if (special) {
-      return {
-        isOpen: special.is_open,
-        openTime: special.open_time?.slice(0, 5) ?? "10:00",
-        closeTime: special.close_time?.slice(0, 5) ?? "22:00",
-      };
-    }
-
     const parsed = new Date(`${date}T12:00:00`);
     const jsDay = parsed.getDay();
     if (jsDay === 0) {
@@ -1262,69 +1259,26 @@ export default function AdminPage() {
     );
   };
 
-  const saveSpecialWorkingHour = async () => {
-    if (!specialDate) {
-      showNotice("error", "Önce bir tarih seç.");
-      return;
-    }
-
-    if (
-      specialIsOpen &&
-      (!specialOpenTime ||
-        !specialCloseTime ||
-        specialOpenTime >= specialCloseTime)
-    ) {
-      showNotice("error", "Açılış ve kapanış saatlerini kontrol et.");
-      return;
-    }
-
-    setSaving(true);
-
-    const { error } = await supabase
-      .from("special_working_hours")
-      .upsert(
-        {
-          work_date: specialDate,
-          is_open: specialIsOpen,
-          open_time: specialIsOpen ? specialOpenTime : null,
-          close_time: specialIsOpen ? specialCloseTime : null,
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: "work_date" }
-      );
-
-    setSaving(false);
-
-    if (error) {
-      console.error(error);
-      showNotice("error", "Özel müsaitlik kaydedilemedi.");
-      return;
-    }
-
-    await loadSettings();
-    showNotice(
-      "success",
-      specialIsOpen
-        ? `${formatDate(specialDate)} için özel çalışma saati kaydedildi.`
-        : `${formatDate(specialDate)} tam gün kapalı olarak kaydedildi.`
-    );
+  const loadBlockedTimeRanges = async () => {
+    const { data, error } = await supabase.from("blocked_time_ranges").select("id,block_date,start_time,end_time").order("block_date", { ascending: true }).order("start_time", { ascending: true });
+    if (error) throw error;
+    setBlockedTimeRanges((data ?? []) as BlockedTimeRange[]);
   };
-
-  const deleteSpecialWorkingHour = async (id: number) => {
-    const { error } = await supabase
-      .from("special_working_hours")
-      .delete()
-      .eq("id", id);
-
-    if (error) {
-      console.error(error);
-      showNotice("error", "Özel müsaitlik kaldırılamadı.");
-      return;
-    }
-
-    await loadSettings();
-    showNotice("success", "Özel müsaitlik kaldırıldı.");
+  const openBlockDay = (date: string) => { setBlockDay(date); const schedule = getDateSchedule(date); setBlockStartTime(schedule.openTime); setBlockEndTime(schedule.closeTime); };
+  const saveBlockedTimeRange = async () => {
+    if (!blockDay || blockSaving) return;
+    if (!blockStartTime || !blockEndTime || blockStartTime >= blockEndTime) return showNotice("error", "Başlangıç ve bitiş saatlerini kontrol et.");
+    const start=timeToMinutesAdmin(blockStartTime), end=timeToMinutesAdmin(blockEndTime);
+    const hasAppointment=appointments.some(a=>!a.is_archived && a.appointment_date===blockDay && !["cancelled","rejected"].includes(a.status) && start < timeToMinutesAdmin(a.appointment_time)+appointmentDuration(a) && timeToMinutesAdmin(a.appointment_time)<end);
+    if(hasAppointment) return showNotice("error","Bu saat aralığında mevcut randevu var. Önce randevuyu taşı veya iptal et.");
+    const overlaps=blockedTimeRanges.some(i=>i.block_date===blockDay && start<timeToMinutesAdmin(i.end_time) && timeToMinutesAdmin(i.start_time)<end);
+    if(overlaps) return showNotice("error","Bu aralık daha önce kapatılmış bir saatle çakışıyor.");
+    setBlockSaving(true); const {error}=await supabase.from("blocked_time_ranges").insert({block_date:blockDay,start_time:blockStartTime,end_time:blockEndTime}); setBlockSaving(false);
+    if(error){console.error(error);return showNotice("error","Saat aralığı kapatılamadı.");}
+    await loadBlockedTimeRanges(); showNotice("success",`${formatDate(blockDay)} • ${blockStartTime}-${blockEndTime} kapatıldı.`);
   };
+  const deleteBlockedTimeRange = async (id:number) => { const {error}=await supabase.from("blocked_time_ranges").delete().eq("id",id); if(error){console.error(error);return showNotice("error","Kapalı saat kaldırılamadı.");} await loadBlockedTimeRanges(); showNotice("success","Kapalı saat tekrar açıldı."); };
+  const isTimeBlocked = (date:string,time:string) => { const m=timeToMinutesAdmin(time); return blockedTimeRanges.some(i=>i.block_date===date && m>=timeToMinutesAdmin(i.start_time) && m<timeToMinutesAdmin(i.end_time)); };
 
   const saveBusiness = async () => {
     if (!business) return;
@@ -1676,6 +1630,17 @@ export default function AdminPage() {
               <RevenueStat title="Bu Haftaki Kazanç" value={`${weeklyRevenue.toLocaleString("tr-TR")} ₺`} />
               <RevenueStat title="Bu Ayki Kazanç" value={`${monthlyRevenue.toLocaleString("tr-TR")} ₺`} />
             </div>
+          </div>
+        </div>
+      )}
+
+      {blockDay && (
+        <div className="fixed inset-0 z-[190] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm" onClick={() => !blockSaving && setBlockDay(null)}>
+          <div className="w-full max-w-md rounded-2xl border border-[#c9a35b]/25 bg-[#111] p-5 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-start justify-between gap-4"><div><p className="text-[10px] tracking-[0.25em] text-[#c9a35b]">SAAT KAPAT</p><h2 className="mt-2 text-xl font-bold">{formatDate(blockDay)}</h2><p className="mt-1 text-xs text-white/40">Müşteriye kapalı olacak saat aralığını seç.</p></div><button type="button" onClick={() => setBlockDay(null)} className="rounded-lg border border-white/10 px-3 py-2 text-xs text-white/50">Kapat</button></div>
+            <div className="mt-6 grid grid-cols-2 gap-3"><Field label="Başlangıç"><input type="time" step="900" value={blockStartTime} onChange={(e)=>setBlockStartTime(e.target.value)} className={inputClass}/></Field><Field label="Bitiş"><input type="time" step="900" value={blockEndTime} onChange={(e)=>setBlockEndTime(e.target.value)} className={inputClass}/></Field></div>
+            <button type="button" disabled={blockSaving} onClick={saveBlockedTimeRange} className="mt-5 w-full rounded-xl bg-[#c9a35b] py-3.5 text-sm font-bold text-black disabled:opacity-40">{blockSaving ? "Kapatılıyor..." : "Bu Saat Aralığını Kapat"}</button>
+            <div className="mt-6 border-t border-white/10 pt-5"><p className="text-xs font-semibold text-white/55">BU GÜN KAPATILAN SAATLER</p><div className="mt-3 space-y-2">{blockedTimeRanges.filter(i=>i.block_date===blockDay).length===0 ? <p className="rounded-xl border border-white/10 px-4 py-3 text-xs text-white/30">Henüz kapatılmış saat yok.</p> : blockedTimeRanges.filter(i=>i.block_date===blockDay).map(i=><div key={i.id} className="flex items-center justify-between rounded-xl border border-red-500/20 bg-red-500/[0.05] px-4 py-3"><span className="text-sm font-semibold text-red-200">{i.start_time.slice(0,5)} – {i.end_time.slice(0,5)}</span><button type="button" onClick={()=>deleteBlockedTimeRange(i.id)} className="rounded-lg border border-red-500/25 px-3 py-1.5 text-xs font-semibold text-red-300">Kaldır</button></div>)}</div></div>
           </div>
         </div>
       )}
@@ -2247,12 +2212,6 @@ export default function AdminPage() {
             Çalışma Saatleri
           </TabButton>
           <TabButton
-            active={activeTab === "availability"}
-            onClick={() => setActiveTab("availability")}
-          >
-            Özel Müsaitlik
-          </TabButton>
-          <TabButton
             active={activeTab === "business"}
             onClick={() => setActiveTab("business")}
           >
@@ -2349,8 +2308,11 @@ export default function AdminPage() {
                     </div>
 
                     {calendarDays.map((day) => (
-                      <div
+                      <button
+                        type="button"
+                        onClick={() => openBlockDay(day.key)}
                         key={day.key}
+                        title={`${formatDate(day.key)} için saat kapat`}
                         className={`border-r border-white/10 px-1 py-2 text-center last:border-r-0 ${
                           day.key === todayKey ? "bg-[#c9a35b]/10" : ""
                         }`}
@@ -2375,7 +2337,7 @@ export default function AdminPage() {
                             month: "2-digit",
                           })}
                         </p>
-                      </div>
+                      </button>
                     ))}
                   </div>
 
@@ -2391,6 +2353,7 @@ export default function AdminPage() {
 
                         {calendarDays.map((day) => {
                           const slotMinutes = timeToMinutesAdmin(slot);
+                          const blocked = isTimeBlocked(day.key, slot);
                           const occupied = day.appointments.some((appointment) => {
                             if (
                               appointment.is_archived ||
@@ -2409,7 +2372,9 @@ export default function AdminPage() {
                                 day.key === todayKey ? "bg-[#c9a35b]/[0.025]" : ""
                               }`}
                             >
-                              {!occupied && (
+                              {blocked ? (
+                                <div className="flex h-[44px] w-full items-center justify-center bg-red-500/[0.08] text-[7px] font-bold text-red-300 sm:text-[8px]">KAPALI</div>
+                              ) : !occupied && (
                                 <button
                                   type="button"
                                   onClick={() => openManualAppointment(day.key, slot)}
@@ -2941,137 +2906,6 @@ export default function AdminPage() {
                   </div>
                 </div>
               ))}
-            </div>
-          </section>
-        )}
-
-        {activeTab === "availability" && (
-          <section className="mt-6">
-            <SectionTitle
-              eyebrow="ÖZEL MÜSAİTLİK"
-              title="Tarihe Özel Çalışma Planı"
-              description="Normal haftalık çalışma saatlerini sadece seçtiğin tarih için değiştir veya o günü tamamen kapat."
-            />
-
-            <div className="mt-6 grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
-              <div className="rounded-2xl border border-white/10 bg-[#101010] p-5">
-                <Field label="Tarih">
-                  <input
-                    type="date"
-                    value={specialDate}
-                    onChange={(e) => {
-                      const value = e.target.value;
-                      setSpecialDate(value);
-
-                      const existing = specialWorkingHours.find(
-                        (item) => item.work_date === value
-                      );
-
-                      if (existing) {
-                        setSpecialIsOpen(existing.is_open);
-                        setSpecialOpenTime(
-                          existing.open_time?.slice(0, 5) ?? "10:00"
-                        );
-                        setSpecialCloseTime(
-                          existing.close_time?.slice(0, 5) ?? "20:00"
-                        );
-                      } else {
-                        setSpecialIsOpen(true);
-                        setSpecialOpenTime("10:00");
-                        setSpecialCloseTime("20:00");
-                      }
-                    }}
-                    className={inputClass}
-                  />
-                </Field>
-
-                <label className="mt-5 flex cursor-pointer items-center gap-3 rounded-xl border border-white/10 bg-[#171717] px-4 py-3 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={specialIsOpen}
-                    onChange={(e) => setSpecialIsOpen(e.target.checked)}
-                    className="h-4 w-4 accent-[#c9a35b]"
-                  />
-                  Bu tarihte çalışılıyor
-                </label>
-
-                {specialIsOpen && (
-                  <div className="mt-4 grid grid-cols-2 gap-3">
-                    <Field label="Başlangıç">
-                      <input
-                        type="time"
-                        value={specialOpenTime}
-                        onChange={(e) => setSpecialOpenTime(e.target.value)}
-                        className={inputClass}
-                      />
-                    </Field>
-
-                    <Field label="Bitiş">
-                      <input
-                        type="time"
-                        value={specialCloseTime}
-                        onChange={(e) => setSpecialCloseTime(e.target.value)}
-                        className={inputClass}
-                      />
-                    </Field>
-                  </div>
-                )}
-
-                <button
-                  type="button"
-                  disabled={saving}
-                  onClick={saveSpecialWorkingHour}
-                  className="mt-5 w-full rounded-xl bg-[#c9a35b] px-5 py-3 font-bold text-black disabled:opacity-40"
-                >
-                  {saving ? "Kaydediliyor..." : "Özel Planı Kaydet"}
-                </button>
-              </div>
-
-              <div className="rounded-2xl border border-white/10 bg-[#101010] p-5">
-                <p className="text-xs font-semibold tracking-[0.18em] text-[#c9a35b]">
-                  KAYITLI ÖZEL GÜNLER
-                </p>
-
-                {specialWorkingHours.length === 0 ? (
-                  <div className="mt-4 rounded-xl border border-dashed border-white/10 p-7 text-center text-sm text-white/30">
-                    Henüz tarihe özel çalışma planı yok.
-                  </div>
-                ) : (
-                  <div className="mt-4 grid gap-2">
-                    {specialWorkingHours.map((item) => (
-                      <div
-                        key={item.id}
-                        className="flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-[#171717] px-4 py-3"
-                      >
-                        <div className="min-w-0">
-                          <p className="font-semibold">
-                            {formatDate(item.work_date)}
-                          </p>
-                          <p
-                            className={`mt-1 text-xs ${
-                              item.is_open
-                                ? "text-emerald-300"
-                                : "text-red-300"
-                            }`}
-                          >
-                            {item.is_open
-                              ? `${item.open_time?.slice(0, 5)} – ${item.close_time?.slice(0, 5)}`
-                              : "Tam gün kapalı"}
-                          </p>
-                        </div>
-
-                        <button
-                          type="button"
-                          onClick={() => deleteSpecialWorkingHour(item.id)}
-                          className="shrink-0 rounded-lg border border-red-500/20 bg-red-500/[0.05] px-3 py-2 text-xs font-semibold text-red-300"
-                        >
-                          Kaldır
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
             </div>
           </section>
         )}
