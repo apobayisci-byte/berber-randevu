@@ -2410,9 +2410,10 @@ export default function AdminPage() {
                               const firstMinute = timeToMinutesAdmin(calendarSlots[0]);
                               const startMinute = timeToMinutesAdmin(appointment.appointment_time);
                               const duration = appointmentDuration(appointment);
-                              // Satırın 44px yüksekliğine 1px alt border da dahil olduğu için
-                              // gerçek dikey adım 45px. Overlay hesabı da aynı değeri kullanmalı.
-                              const rowHeight = 45;
+                              // Takvim satırının gerçek yüksekliği 44px.
+                              // border, box-sizing nedeniyle bu 44px'in içindedir; ekstra 1px eklenmez.
+                              // Overlay de 44px kullanmalı ki aşağı indikçe saatlerden kaymasın.
+                              const rowHeight = 44;
                               const top = ((startMinute - firstMinute) / 15) * rowHeight;
                               const height = Math.max((duration / 15) * rowHeight, rowHeight);
 
