@@ -283,7 +283,9 @@ export default function AdminPage() {
   };
 
   const loadSettings = async () => {
-    const [servicesResult, hoursResult, businessResult, blockedRangesResult] = await Promise.all([
+    // Kritik panel verilerini eski çalışan sürümdeki gibi yükle.
+    // Saat kapatma kayıtları panelin/login'in açılmasını BLOKE ETMEZ.
+    const [servicesResult, hoursResult, businessResult] = await Promise.all([
       supabase
         .from("services")
         .select("id,name,price,duration_minutes,is_active,sort_order")
@@ -297,24 +299,15 @@ export default function AdminPage() {
         .select("id,barber_name,phone,instagram,address,appointment_interval")
         .limit(1)
         .single(),
-      supabase
-        .from("blocked_time_ranges")
-        .select("id,block_date,start_time,end_time")
-        .order("block_date", { ascending: true })
-        .order("start_time", { ascending: true }),
     ]);
 
     if (servicesResult.error) throw servicesResult.error;
     if (hoursResult.error) throw hoursResult.error;
     if (businessResult.error) throw businessResult.error;
-    if (blockedRangesResult.error) throw blockedRangesResult.error;
 
     setServices((servicesResult.data ?? []) as Service[]);
     setWorkingHours((hoursResult.data ?? []) as WorkingHour[]);
     setBusiness(businessResult.data as BusinessSettings);
-    setBlockedTimeRanges(
-      (blockedRangesResult.data ?? []) as BlockedTimeRange[]
-    );
   };
 
   const loadAll = async () => {
@@ -337,62 +330,27 @@ export default function AdminPage() {
   };
 
   useEffect(() => {
-    let active = true;
-
     const checkSession = async () => {
-      try {
-        const {
-          data: { session },
-          error: sessionError,
-        } = await supabase.auth.getSession();
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
 
-        if (sessionError) {
-          console.error("Oturum kontrolü başarısız:", sessionError);
-          return;
-        }
-
-        if (!session) return;
-
+      if (session) {
         const { data: isAdmin, error: adminError } =
           await supabase.rpc("is_admin");
 
-        if (adminError) {
-          console.error("Admin yetkisi kontrol edilemedi:", adminError);
-          return;
-        }
-
-        if (isAdmin === true && active) {
+        if (!adminError && isAdmin === true) {
           setLoggedIn(true);
-
-          // Paneli açmak için bütün verilerin yüklenmesini beklemiyoruz.
-          // Böylece tek bir Supabase sorgusu gecikse bile ekran
-          // “Admin paneli yükleniyor...” durumunda takılı kalmaz.
-          void loadAll().catch((err) => {
-            console.error("Panel verileri yüklenemedi:", err);
-            if (active) setError("Panel verileri yüklenemedi. Yenilemeyi dene.");
-          });
+          await loadAll();
         } else {
           await supabase.auth.signOut();
         }
-      } catch (err) {
-        console.error("Admin oturum kontrolü hatası:", err);
-      } finally {
-        if (active) setChecking(false);
       }
+
+      setChecking(false);
     };
 
-    // Supabase/auth isteği beklenmedik şekilde askıda kalırsa
-    // yükleme ekranını sonsuza kadar göstermemek için güvenlik süresi.
-    const safetyTimer = window.setTimeout(() => {
-      if (active) setChecking(false);
-    }, 8000);
-
-    void checkSession();
-
-    return () => {
-      active = false;
-      window.clearTimeout(safetyTimer);
-    };
+    checkSession();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -1299,6 +1257,18 @@ export default function AdminPage() {
     if (error) throw error;
     setBlockedTimeRanges((data ?? []) as BlockedTimeRange[]);
   };
+
+  useEffect(() => {
+    if (!loggedIn) return;
+
+    // Saat kapatma verisi ayrı yüklenir. Bu sorgu gecikse bile
+    // giriş ekranı ve haftalık randevu takvimi beklemez.
+    loadBlockedTimeRanges().catch((err) => {
+      console.error("Kapalı saatler yüklenemedi:", err);
+      showNotice("error", "Kapalı saatler yüklenemedi. Takvim yine kullanılabilir.");
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loggedIn]);
   const openBlockDay = (date: string) => { setBlockDay(date); const schedule = getDateSchedule(date); setBlockStartTime(schedule.openTime); setBlockEndTime(schedule.closeTime); };
   const saveBlockedTimeRange = async () => {
     if (!blockDay || blockSaving) return;
