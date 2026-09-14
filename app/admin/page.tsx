@@ -12,6 +12,7 @@ type Appointment = {
   appointment_time: string;
   status: string;
   price_at_booking: number | null;
+  total_price: number | null;
   is_archived: boolean;
   archived_at: string | null;
   total_duration_minutes: number | null;
@@ -102,6 +103,7 @@ export default function AdminPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [activeTab, setActiveTab] = useState<Tab>("appointments");
+  const [showRevenueSummary, setShowRevenueSummary] = useState(false);
   const [weekOffset, setWeekOffset] = useState(0);
   const [selectedAppointment, setSelectedAppointment] =
     useState<Appointment | null>(null);
@@ -225,6 +227,7 @@ export default function AdminPage() {
         appointment_time,
         status,
         price_at_booking,
+        total_price,
         is_archived,
         archived_at,
         total_duration_minutes,
@@ -1309,33 +1312,117 @@ export default function AdminPage() {
     "0"
   )}:${String(istanbulNow.getMinutes()).padStart(2, "0")}`;
 
+  // Haftalık müşteri ve kazanç, randevu oluşturulduğu anda hesaba girer.
+  // İptal/reddedilen randevu ise otomatik olarak toplamdan çıkar.
   const weeklyRealized = appointments.filter(
-    (appointment) => {
-      if (
-        ["cancelled", "rejected"].includes(appointment.status) ||
-        appointment.appointment_date < weekStartKey ||
-        appointment.appointment_date > weekEndKey
-      ) {
-        return false;
-      }
-
-      if (appointment.appointment_date < todayKey) return true;
-      if (appointment.appointment_date > todayKey) return false;
-
-      return appointment.appointment_time.slice(0, 5) <= currentTimeKey;
-    }
+    (appointment) =>
+      !["cancelled", "rejected"].includes(appointment.status) &&
+      appointment.appointment_date >= weekStartKey &&
+      appointment.appointment_date <= weekEndKey
   );
 
   const weeklyCustomers = weeklyRealized.length;
 
+  const appointmentRevenue = (appointment: Appointment) => {
+    const snapshotServicesTotal = (appointment.appointment_services ?? []).reduce(
+      (sum, service) => sum + Number(service.price_at_booking ?? 0),
+      0
+    );
+
+    const appointmentTotal = Number(appointment.total_price ?? 0);
+    const primaryPrice = Number(
+      appointment.price_at_booking ?? appointment.services?.price ?? 0
+    );
+
+    return appointmentTotal > 0
+      ? appointmentTotal
+      : snapshotServicesTotal > 0
+        ? snapshotServicesTotal
+        : primaryPrice;
+  };
+
+  const todayActive = appointments.filter(
+    (appointment) =>
+      appointment.appointment_date === todayKey &&
+      !["cancelled", "rejected"].includes(appointment.status)
+  );
+
+  const todayRevenue = todayActive.reduce(
+    (total, appointment) => total + appointmentRevenue(appointment),
+    0
+  );
+
+  const tomorrowDate = new Date(today);
+  tomorrowDate.setDate(tomorrowDate.getDate() + 1);
+  const tomorrowKey = localDateKey(tomorrowDate);
+
+  const tomorrowActive = appointments.filter(
+    (appointment) =>
+      appointment.appointment_date === tomorrowKey &&
+      !["cancelled", "rejected"].includes(appointment.status)
+  );
+
+  const tomorrowAppointments = tomorrowActive.length;
+
+  const tomorrowRevenue = tomorrowActive.reduce(
+    (total, appointment) => total + appointmentRevenue(appointment),
+    0
+  );
+
+  const monthStartKey = `${todayKey.slice(0, 7)}-01`;
+  const monthEndDate = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+  const monthEndKey = localDateKey(monthEndDate);
+
+  const monthlyActive = appointments.filter(
+    (appointment) =>
+      !["cancelled", "rejected"].includes(appointment.status) &&
+      appointment.appointment_date >= monthStartKey &&
+      appointment.appointment_date <= monthEndKey
+  );
+
+  const monthlyCustomers = monthlyActive.length;
+  const monthlyRevenue = monthlyActive.reduce(
+    (total, appointment) => total + appointmentRevenue(appointment),
+    0
+  );
+
+  const weeklyCancelled = appointments.filter(
+    (appointment) =>
+      ["cancelled", "rejected"].includes(appointment.status) &&
+      appointment.appointment_date >= weekStartKey &&
+      appointment.appointment_date <= weekEndKey
+  ).length;
+
+  const nextAppointment = appointments
+    .filter((appointment) => {
+      if (["cancelled", "rejected"].includes(appointment.status)) return false;
+      if (appointment.appointment_date > todayKey) return true;
+      if (appointment.appointment_date < todayKey) return false;
+      return appointment.appointment_time.slice(0, 5) >= currentTimeKey;
+    })
+    .sort((a, b) => {
+      const dateCompare = a.appointment_date.localeCompare(b.appointment_date);
+      return dateCompare !== 0
+        ? dateCompare
+        : a.appointment_time.localeCompare(b.appointment_time);
+    })[0];
+
+  const nextAppointmentValue = nextAppointment
+    ? `${nextAppointment.customer_name} • ${
+        nextAppointment.appointment_date === todayKey
+          ? `Bugün ${nextAppointment.appointment_time.slice(0, 5)}`
+          : nextAppointment.appointment_date === tomorrowKey
+            ? `Yarın ${nextAppointment.appointment_time.slice(0, 5)}`
+            : `${nextAppointment.appointment_date.slice(8, 10)}/${nextAppointment.appointment_date.slice(5, 7)} ${nextAppointment.appointment_time.slice(0, 5)}`
+      }`
+    : "Randevu yok";
+
+  const nextAppointmentService = nextAppointment
+    ? getAppointmentServicesText(nextAppointment)
+    : "";
+
   const weeklyRevenue = weeklyRealized.reduce(
-    (total, appointment) =>
-      total +
-      Number(
-        appointment.price_at_booking ??
-          appointment.services?.price ??
-          0
-      ),
+    (total, appointment) => total + appointmentRevenue(appointment),
     0
   );
 
@@ -1369,7 +1456,7 @@ export default function AdminPage() {
         (appointment) =>
           !appointment.is_archived &&
           appointment.appointment_date === key &&
-          !["rejected"].includes(appointment.status)
+          !["cancelled", "rejected"].includes(appointment.status)
       )
       .sort((a, b) => a.appointment_time.localeCompare(b.appointment_time));
 
@@ -1399,6 +1486,41 @@ export default function AdminPage() {
 
   return (
     <main className="min-h-screen bg-[#080808] text-white">
+      {showRevenueSummary && (
+        <div
+          className="fixed inset-0 z-[220] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
+          onClick={() => setShowRevenueSummary(false)}
+        >
+          <div
+            className="w-full max-w-md rounded-2xl border border-[#c9a35b]/25 bg-[#101010] p-5 shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-[10px] tracking-[0.22em] text-[#c9a35b]">FİNANS</p>
+                <h2 className="mt-1 text-2xl font-bold">Kazanç Özeti</h2>
+                <p className="mt-1 text-xs leading-5 text-white/35">
+                  Aktif randevuların planlanan kazanç toplamları.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowRevenueSummary(false)}
+                className="rounded-lg border border-white/10 px-3 py-2 text-xs text-white/45 hover:text-white"
+              >
+                Kapat
+              </button>
+            </div>
+            <div className="mt-5 grid grid-cols-2 gap-2">
+              <RevenueStat title="Bugünkü Kazanç" value={`${todayRevenue.toLocaleString("tr-TR")} ₺`} />
+              <RevenueStat title="Yarınki Kazanç" value={`${tomorrowRevenue.toLocaleString("tr-TR")} ₺`} />
+              <RevenueStat title="Bu Haftaki Kazanç" value={`${weeklyRevenue.toLocaleString("tr-TR")} ₺`} />
+              <RevenueStat title="Bu Ayki Kazanç" value={`${monthlyRevenue.toLocaleString("tr-TR")} ₺`} />
+            </div>
+          </div>
+        </div>
+      )}
+
       {manualSlot && (
         <div
           className="fixed inset-0 z-[160] flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm"
@@ -2027,20 +2149,20 @@ export default function AdminPage() {
                                   key={appointment.id}
                                   type="button"
                                   onClick={() => setSelectedAppointment(appointment)}
-                                  className="pointer-events-auto absolute left-1 right-1 z-10 flex overflow-hidden rounded-md border border-[#c9a35b]/35 bg-[#17150f] px-2.5 text-left shadow-lg transition hover:border-[#c9a35b]/60 hover:bg-[#1d1a12]"
+                                  className="pointer-events-auto absolute left-0.5 right-0.5 z-10 flex overflow-hidden rounded-md border border-[#c9a35b]/35 bg-[#17150f] px-1 sm:px-1.5 lg:px-2.5 text-left shadow-lg transition hover:border-[#c9a35b]/60 hover:bg-[#1d1a12]"
                                   style={{
-                                    top: `${top + 5}px`,
-                                    height: `${Math.max(height - 10, 34)}px`,
+                                    top: `${top + 4}px`,
+                                    height: `${Math.max(height - 8, 36)}px`,
                                   }}
                                 >
-                                  <div className="my-auto min-w-0 w-full">
-                                    <p className="truncate text-[8px] font-bold leading-tight text-white sm:text-[9px] lg:text-[10px]">
+                                  <div className="my-auto min-w-0 w-full overflow-hidden">
+                                    <p className="whitespace-nowrap text-[5px] font-bold leading-[7px] text-white sm:text-[7px] sm:leading-[9px] lg:text-[9px] lg:leading-[11px]">
                                       {appointment.customer_name}
                                     </p>
-                                    <p className="mt-0.5 truncate text-[7px] font-semibold leading-tight text-emerald-300 sm:text-[8px] lg:text-[9px]">
+                                    <p className="mt-0.5 whitespace-nowrap text-[5px] font-semibold leading-[7px] text-emerald-300 sm:text-[7px] sm:leading-[9px] lg:text-[8px] lg:leading-[10px]">
                                       {appointment.customer_phone}
                                     </p>
-                                    <p className="mt-1 truncate text-[6px] leading-tight text-white/45 sm:text-[7px] lg:text-[8px]">
+                                    <p className="mt-0.5 whitespace-nowrap text-[4px] leading-[6px] text-white/55 sm:text-[6px] sm:leading-[8px] lg:text-[7px] lg:leading-[9px]">
                                       {getAppointmentServicesText(appointment)} • {duration} dk
                                     </p>
                                   </div>
@@ -2069,27 +2191,27 @@ export default function AdminPage() {
               description="Günlük ve haftalık randevu performansını buradan takip edebilirsin."
             />
 
-            <div className="mt-6 grid grid-cols-2 gap-3 xl:grid-cols-4">
+            <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3">
+              <Stat title="Bugünkü Randevu" value={todayAppointments} />
+              <Stat title="Yarınki Randevu" value={tomorrowAppointments} />
+              <Stat title="Bu Haftaki Müşteri" value={weeklyCustomers} />
+              <Stat title="Bu Ayki Müşteri" value={monthlyCustomers} />
               <Stat
-                title="Bugünkü Randevu"
-                value={todayAppointments}
-                subtitle="İptal ve reddedilenler hariç"
+                title="Sıradaki Randevu"
+                value={nextAppointmentValue}
+                subtitle={nextAppointmentService}
+                compactValue
+                compactSubtitle
               />
-              <Stat
-                title="Bu Haftaki Müşteri"
-                value={weeklyCustomers}
-                subtitle="Gerçekleşen, iptal edilmemiş randevular"
-              />
-              <Stat
-                title="Bu Haftaki Kazanç"
-                value={`${weeklyRevenue.toLocaleString("tr-TR")} ₺`}
-                subtitle="Gerçekleşen randevuların toplamı"
-              />
-              <Stat
-                title="Onay Bekleyen"
-                value={pending}
-                subtitle="Aktif işlem bekleyen randevular"
-              />
+              <div className="flex min-h-[74px] items-end justify-end sm:min-h-[82px]">
+                <button
+                  type="button"
+                  onClick={() => setShowRevenueSummary(true)}
+                  className="rounded-lg border border-[#c9a35b]/35 bg-[#c9a35b]/[0.07] px-3 py-2 text-[9px] font-semibold text-[#d9b45f] transition hover:border-[#c9a35b]/60 hover:bg-[#c9a35b]/[0.12] sm:text-[10px]"
+                >
+                  Kazanç Özeti
+                </button>
+              </div>
             </div>
           </section>
         )}
@@ -2985,23 +3107,50 @@ function WhatsAppPhone({
   );
 }
 
+function RevenueStat({ title, value }: { title: string; value: string }) {
+  return (
+    <div className="rounded-xl border border-white/10 bg-[#0b0b0b] px-3 py-4">
+      <p className="text-[9px] text-white/35 sm:text-[10px]">{title}</p>
+      <p className="mt-1.5 text-xl font-bold text-[#c9a35b] sm:text-2xl">{value}</p>
+    </div>
+  );
+}
+
 function Stat({
   title,
   value,
   subtitle,
+  compactValue = false,
+  compactSubtitle = false,
 }: {
   title: string;
   value: number | string;
   subtitle?: string;
+  compactValue?: boolean;
+  compactSubtitle?: boolean;
 }) {
   return (
-    <div className="rounded-2xl border border-white/10 bg-[#101010] p-5">
-      <p className="text-[10px] text-white/35 sm:text-xs">{title}</p>
-      <p className="mt-1.5 text-2xl font-bold text-[#c9a35b] sm:mt-2 sm:text-3xl">
+    <div className="flex min-h-[74px] min-w-0 flex-col justify-center rounded-xl border border-white/10 bg-[#101010] px-3 py-2.5 sm:min-h-[82px] sm:px-4">
+      <p className="truncate text-[8px] leading-3 text-white/35 sm:text-[10px]">
+        {title}
+      </p>
+      <p
+        className={
+          compactValue
+            ? "mt-1 whitespace-normal break-words text-[10px] font-semibold leading-[14px] text-white sm:text-[11px] sm:leading-4"
+            : "mt-1 truncate text-[17px] font-bold leading-6 text-[#c9a35b] sm:text-xl"
+        }
+      >
         {value}
       </p>
       {subtitle && (
-        <p className="mt-1.5 text-[8px] leading-3 text-white/25 sm:mt-2 sm:text-[11px]">
+        <p
+          className={
+            compactSubtitle
+              ? "mt-0.5 truncate text-[7px] leading-[10px] text-[#c9a35b]/70 sm:text-[8px]"
+              : "mt-1 truncate text-[7px] leading-3 text-white/25 sm:text-[9px]"
+          }
+        >
           {subtitle}
         </p>
       )}
