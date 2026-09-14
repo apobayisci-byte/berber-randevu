@@ -127,6 +127,41 @@ function createDateOptions(workingHours: WorkingHour[]): DateOption[] {
   return dates;
 }
 
+
+const PUBLIC_DATA_CACHE_TTL = 5 * 60 * 1000;
+
+function readSessionCache<T>(key: string): T | null {
+  if (typeof window === "undefined") return null;
+
+  try {
+    const raw = window.sessionStorage.getItem(key);
+    if (!raw) return null;
+
+    const parsed = JSON.parse(raw) as { savedAt: number; data: T };
+    if (!parsed?.savedAt || Date.now() - parsed.savedAt > PUBLIC_DATA_CACHE_TTL) {
+      window.sessionStorage.removeItem(key);
+      return null;
+    }
+
+    return parsed.data;
+  } catch {
+    return null;
+  }
+}
+
+function writeSessionCache<T>(key: string, data: T) {
+  if (typeof window === "undefined") return;
+
+  try {
+    window.sessionStorage.setItem(
+      key,
+      JSON.stringify({ savedAt: Date.now(), data })
+    );
+  } catch {
+    // Tarayıcı depolaması kapalıysa site normal şekilde çalışmaya devam eder.
+  }
+}
+
 export default function Home() {
   const [intro, setIntro] = useState(true);
   const [view, setView] = useState<View>("home");
@@ -246,8 +281,15 @@ export default function Home() {
   }, [workingHours]);
 
   useEffect(() => {
+    const cachedServices = readSessionCache<Service[]>("public-services-v1");
+
+    if (cachedServices) {
+      setServices(cachedServices);
+      setServicesLoading(false);
+    }
+
     const loadServices = async () => {
-      setServicesLoading(true);
+      if (!cachedServices) setServicesLoading(true);
       setServicesError("");
 
       const supabase = createClient();
@@ -262,15 +304,21 @@ export default function Home() {
 
       if (error) {
         console.error("Hizmetler alınamadı:", error);
-        setServices([]);
-        setServicesError(
-          "Hizmetler şu anda yüklenemedi. Lütfen sayfayı yenileyin."
-        );
+
+        if (!cachedServices) {
+          setServices([]);
+          setServicesError(
+            "Hizmetler şu anda yüklenemedi. Lütfen sayfayı yenileyin."
+          );
+        }
+
         setServicesLoading(false);
         return;
       }
 
-      setServices((data ?? []) as Service[]);
+      const freshServices = (data ?? []) as Service[];
+      setServices(freshServices);
+      writeSessionCache("public-services-v1", freshServices);
       setServicesLoading(false);
     };
 
@@ -278,19 +326,26 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
+    const cachedReviews = readSessionCache<Review[]>("public-reviews-v1");
+
+    if (cachedReviews) {
+      setReviews(cachedReviews);
+      setReviewsLoading(false);
+    }
+
     const loadReviews = async () => {
-      setReviewsLoading(true);
+      if (!cachedReviews) setReviewsLoading(true);
 
       try {
-        const response = await fetch("/api/reviews", {
-          cache: "no-store",
-        });
+        const response = await fetch("/api/reviews");
         const result = (await response.json()) as {
           reviews?: Review[];
         };
 
         if (response.ok) {
-          setReviews(result.reviews ?? []);
+          const freshReviews = result.reviews ?? [];
+          setReviews(freshReviews);
+          writeSessionCache("public-reviews-v1", freshReviews);
         }
       } catch (error) {
         console.error("Yorumlar alınamadı:", error);
@@ -323,8 +378,19 @@ export default function Home() {
   }, [reviews.length]);
 
   useEffect(() => {
+    const cachedSchedule = readSessionCache<{
+      workingHours: WorkingHour[];
+      businessSettings: BusinessSettings | null;
+    }>("public-schedule-v1");
+
+    if (cachedSchedule) {
+      setWorkingHours(cachedSchedule.workingHours);
+      setBusinessSettings(cachedSchedule.businessSettings);
+      setScheduleLoading(false);
+    }
+
     const loadSchedule = async () => {
-      setScheduleLoading(true);
+      if (!cachedSchedule) setScheduleLoading(true);
       setScheduleError("");
 
       const supabase = createClient();
@@ -346,15 +412,28 @@ export default function Home() {
           workingHoursError: workingHoursResult.error,
           settingsError: settingsResult.error,
         });
-        setScheduleError(
-          "Çalışma günleri ve saatleri şu anda yüklenemedi. Lütfen sayfayı yenileyin."
-        );
+
+        if (!cachedSchedule) {
+          setScheduleError(
+            "Çalışma günleri ve saatleri şu anda yüklenemedi. Lütfen sayfayı yenileyin."
+          );
+        }
+
         setScheduleLoading(false);
         return;
       }
 
-      setWorkingHours((workingHoursResult.data ?? []) as WorkingHour[]);
-      setBusinessSettings(settingsResult.data as BusinessSettings | null);
+      const freshWorkingHours =
+        (workingHoursResult.data ?? []) as WorkingHour[];
+      const freshBusinessSettings =
+        settingsResult.data as BusinessSettings | null;
+
+      setWorkingHours(freshWorkingHours);
+      setBusinessSettings(freshBusinessSettings);
+      writeSessionCache("public-schedule-v1", {
+        workingHours: freshWorkingHours,
+        businessSettings: freshBusinessSettings,
+      });
       setScheduleLoading(false);
     };
 
