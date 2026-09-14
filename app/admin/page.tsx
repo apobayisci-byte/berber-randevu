@@ -2416,12 +2416,12 @@ export default function AdminPage() {
                               const top = ((startMinute - firstMinute) / 15) * rowHeight;
                               const height = Math.max((duration / 15) * rowHeight, rowHeight);
 
-                              // Randevunun gerçek süresi/çakışma hesabı değişmez.
-                              // Sadece takvimde görünen kart mobilde daha kompakt tutulur.
-                              const visualHeight = Math.max(
-                                36,
-                                Math.min(Math.round(height * 0.5), 64)
-                              );
+                              // Takvim 15 dakikalık satır yapısını aynen korur.
+                              // Kart, hizmetin kapattığı TÜM satırların alanını kullanır.
+                              // Örn. 30 dk = 2 satır, 45 dk = 3 satır.
+                              // Üstten ve alttan 4px boşluk bırakılır.
+                              const visualHeight = Math.max(height - 8, 37);
+                              const cardTop = top + 4;
 
                               if (top < 0 || top >= calendarSlots.length * rowHeight) return null;
 
@@ -2430,17 +2430,17 @@ export default function AdminPage() {
                                   key={appointment.id}
                                   type="button"
                                   onClick={() => setSelectedAppointment(appointment)}
-                                  className={`pointer-events-auto absolute left-0.5 right-0.5 z-10 flex overflow-hidden rounded-md border px-1 sm:px-1.5 lg:px-2.5 text-left shadow-lg transition ${
+                                  className={`pointer-events-auto absolute left-0.5 right-0.5 z-20 flex overflow-hidden rounded-md border px-1 sm:px-1.5 lg:px-2.5 text-left shadow-lg transition ${
                                     appointment.status === "completed"
                                       ? "border-emerald-500/65 bg-[#0d241b] hover:border-emerald-400/80 hover:bg-[#123025]"
                                       : "border-[#c9a35b]/35 bg-[#17150f] hover:border-[#c9a35b]/60 hover:bg-[#1d1a12]"
                                   }`}
                                   style={{
-                                    top: `${top + (height - visualHeight) / 2}px`,
+                                    top: `${cardTop}px`,
                                     height: `${visualHeight}px`,
                                   }}
                                 >
-                                  <div className="my-auto min-w-0 w-full overflow-hidden">
+                                  <div className="my-auto min-w-0 w-full overflow-hidden py-0.5">
                                     <p className="whitespace-nowrap text-[5px] font-bold leading-[7px] text-white sm:text-[7px] sm:leading-[9px] lg:text-[9px] lg:leading-[11px]">
                                       {appointment.customer_name}
                                     </p>
