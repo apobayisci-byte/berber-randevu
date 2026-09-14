@@ -337,27 +337,62 @@ export default function AdminPage() {
   };
 
   useEffect(() => {
-    const checkSession = async () => {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
+    let active = true;
 
-      if (session) {
+    const checkSession = async () => {
+      try {
+        const {
+          data: { session },
+          error: sessionError,
+        } = await supabase.auth.getSession();
+
+        if (sessionError) {
+          console.error("Oturum kontrolü başarısız:", sessionError);
+          return;
+        }
+
+        if (!session) return;
+
         const { data: isAdmin, error: adminError } =
           await supabase.rpc("is_admin");
 
-        if (!adminError && isAdmin === true) {
+        if (adminError) {
+          console.error("Admin yetkisi kontrol edilemedi:", adminError);
+          return;
+        }
+
+        if (isAdmin === true && active) {
           setLoggedIn(true);
-          await loadAll();
+
+          // Paneli açmak için bütün verilerin yüklenmesini beklemiyoruz.
+          // Böylece tek bir Supabase sorgusu gecikse bile ekran
+          // “Admin paneli yükleniyor...” durumunda takılı kalmaz.
+          void loadAll().catch((err) => {
+            console.error("Panel verileri yüklenemedi:", err);
+            if (active) setError("Panel verileri yüklenemedi. Yenilemeyi dene.");
+          });
         } else {
           await supabase.auth.signOut();
         }
+      } catch (err) {
+        console.error("Admin oturum kontrolü hatası:", err);
+      } finally {
+        if (active) setChecking(false);
       }
-
-      setChecking(false);
     };
 
-    checkSession();
+    // Supabase/auth isteği beklenmedik şekilde askıda kalırsa
+    // yükleme ekranını sonsuza kadar göstermemek için güvenlik süresi.
+    const safetyTimer = window.setTimeout(() => {
+      if (active) setChecking(false);
+    }, 8000);
+
+    void checkSession();
+
+    return () => {
+      active = false;
+      window.clearTimeout(safetyTimer);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
