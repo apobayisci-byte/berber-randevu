@@ -2410,21 +2410,20 @@ export default function AdminPage() {
                               const firstMinute = timeToMinutesAdmin(calendarSlots[0]);
                               const startMinute = timeToMinutesAdmin(appointment.appointment_time);
                               const duration = appointmentDuration(appointment);
-                              // Takvim satırının gerçek yüksekliği 44px.
-                              // border, box-sizing nedeniyle bu 44px'in içindedir; ekstra 1px eklenmez.
-                              // Overlay de 44px kullanmalı ki aşağı indikçe saatlerden kaymasın.
-                              const rowHeight = 44;
-                              const top = ((startMinute - firstMinute) / 15) * rowHeight;
-                              const height = Math.max((duration / 15) * rowHeight, rowHeight);
+                              // Kartı sabit piksel biriktirerek değil, doğrudan 15 dakikalık
+                              // takvim satırı indeksine göre yerleştiriyoruz. Böylece mobil/PC farkında
+                              // aşağı indikçe oluşan kümülatif kayma ortadan kalkar.
+                              const rowHeight = 45;
+                              const slotIndex = (startMinute - firstMinute) / 15;
+                              const durationSlots = Math.max(duration / 15, 1);
+                              const topPercent = (slotIndex / calendarSlots.length) * 100;
+                              const heightPercent = (durationSlots / calendarSlots.length) * 100;
 
                               // Takvim 15 dakikalık satır yapısını aynen korur.
                               // Kart, hizmetin kapattığı TÜM satırların alanını kullanır.
                               // Örn. 30 dk = 2 satır, 45 dk = 3 satır.
                               // Üstten ve alttan 4px boşluk bırakılır.
-                              const visualHeight = Math.max(height - 8, 37);
-                              const cardTop = top + 4;
-
-                              if (top < 0 || top >= calendarSlots.length * rowHeight) return null;
+                              if (slotIndex < 0 || slotIndex >= calendarSlots.length) return null;
 
                               return (
                                 <button
@@ -2437,8 +2436,9 @@ export default function AdminPage() {
                                       : "border-[#c9a35b]/45 bg-[#17150f] hover:border-[#c9a35b]/70 hover:bg-[#1d1a12]"
                                   }`}
                                   style={{
-                                    top: `${cardTop}px`,
-                                    height: `${visualHeight}px`,
+                                    top: `calc(${topPercent}% + 4px)`,
+                                    height: `calc(${heightPercent}% - 8px)`,
+                                    minHeight: "37px",
                                   }}
                                 >
                                   <div className="my-auto min-w-0 w-full overflow-hidden py-0.5">
