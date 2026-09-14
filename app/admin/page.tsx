@@ -2432,7 +2432,7 @@ export default function AdminPage() {
                                   onClick={() => setSelectedAppointment(appointment)}
                                   className={`pointer-events-auto absolute left-0.5 right-0.5 z-10 flex overflow-hidden rounded-md border px-1 sm:px-1.5 lg:px-2.5 text-left shadow-lg transition ${
                                     appointment.status === "completed"
-                                      ? "border-emerald-500/65 bg-emerald-500/[0.10] hover:border-emerald-400/80 hover:bg-emerald-500/[0.14]"
+                                      ? "border-emerald-500/65 bg-[#0d241b] hover:border-emerald-400/80 hover:bg-[#123025]"
                                       : "border-[#c9a35b]/35 bg-[#17150f] hover:border-[#c9a35b]/60 hover:bg-[#1d1a12]"
                                   }`}
                                   style={{
