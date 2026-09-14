@@ -18,6 +18,7 @@ type Appointment = {
   total_duration_minutes: number | null;
   services: { name: string; price: number | null } | null;
   appointment_services: {
+    service_id: number;
     service_name: string;
     price_at_booking: number | null;
     duration_minutes: number;
@@ -107,6 +108,10 @@ export default function AdminPage() {
   const [weekOffset, setWeekOffset] = useState(0);
   const [selectedAppointment, setSelectedAppointment] =
     useState<Appointment | null>(null);
+  const [serviceChangeAppointment, setServiceChangeAppointment] =
+    useState<Appointment | null>(null);
+  const [serviceChangeId, setServiceChangeId] = useState<number | null>(null);
+  const [serviceChangeSaving, setServiceChangeSaving] = useState(false);
 
   const [manualSlot, setManualSlot] = useState<{ date: string; time: string } | null>(null);
   const [manualName, setManualName] = useState("");
@@ -233,6 +238,7 @@ export default function AdminPage() {
         total_duration_minutes,
         services (name, price),
         appointment_services (
+          service_id,
           service_name,
           price_at_booking,
           duration_minutes
@@ -671,6 +677,159 @@ export default function AdminPage() {
       messages[status] ?? "Randevu güncellendi."
     );
     setUpdatingId(null);
+  };
+
+  const openServiceChange = (appointment: Appointment) => {
+    const currentServiceName =
+      appointment.appointment_services?.[0]?.service_name ??
+      appointment.services?.name ??
+      "";
+
+    const currentService = services.find(
+      (service) => service.name === currentServiceName
+    );
+
+    setServiceChangeAppointment(appointment);
+    setServiceChangeId(currentService?.id ?? null);
+    setSelectedAppointment(null);
+  };
+
+  const saveServiceChange = async () => {
+    if (
+      !serviceChangeAppointment ||
+      !serviceChangeId ||
+      serviceChangeSaving
+    ) {
+      return;
+    }
+
+    const selectedService = services.find(
+      (service) => service.id === serviceChangeId && service.is_active
+    );
+
+    if (!selectedService) {
+      showNotice("error", "Seçilen hizmet bulunamadı.");
+      return;
+    }
+
+    if (
+      !isSlotAvailable(
+        serviceChangeAppointment.appointment_date,
+        serviceChangeAppointment.appointment_time.slice(0, 5),
+        selectedService.duration_minutes,
+        serviceChangeAppointment.id
+      )
+    ) {
+      showNotice(
+        "error",
+        "Bu hizmetin süresi sonraki randevuyla çakışıyor. Önce saati değiştir."
+      );
+      return;
+    }
+
+    const oldServiceName =
+      getAppointmentServicesText(serviceChangeAppointment);
+    const oldPrice = serviceChangeAppointment.total_price;
+    const oldDuration = serviceChangeAppointment.total_duration_minutes;
+    const oldPrimaryPrice = serviceChangeAppointment.price_at_booking;
+    const oldSnapshots = serviceChangeAppointment.appointment_services ?? [];
+    const oldServiceId = oldSnapshots[0]?.service_id ?? null;
+
+    setServiceChangeSaving(true);
+
+    try {
+      const { error: appointmentError } = await supabase
+        .from("appointments")
+        .update({
+          service_id: selectedService.id,
+          price_at_booking: selectedService.price ?? 0,
+          total_price: selectedService.price ?? 0,
+          total_duration_minutes: selectedService.duration_minutes,
+        })
+        .eq("id", serviceChangeAppointment.id);
+
+      if (appointmentError) throw appointmentError;
+
+      const { error: deleteSnapshotError } = await supabase
+        .from("appointment_services")
+        .delete()
+        .eq("appointment_id", serviceChangeAppointment.id);
+
+      if (deleteSnapshotError) throw deleteSnapshotError;
+
+      const { error: insertSnapshotError } = await supabase
+        .from("appointment_services")
+        .insert({
+          appointment_id: serviceChangeAppointment.id,
+          service_id: selectedService.id,
+          service_name: selectedService.name,
+          price_at_booking: selectedService.price ?? 0,
+          duration_minutes: selectedService.duration_minutes,
+        });
+
+      if (insertSnapshotError) throw insertSnapshotError;
+
+      try {
+        await addActivityLog(
+          serviceChangeAppointment.id,
+          "appointment_service_changed",
+          `${serviceChangeAppointment.customer_name} adlı müşterinin hizmeti ${oldServiceName} → ${selectedService.name} olarak değiştirildi.`
+        );
+      } catch (logError) {
+        console.error("Hizmet değişikliği logu kaydedilemedi:", logError);
+      }
+
+      await Promise.all([loadAppointments(), loadActivityLogs()]);
+      setServiceChangeAppointment(null);
+      setServiceChangeId(null);
+      showNotice(
+        "success",
+        `Hizmet ${selectedService.name} olarak değiştirildi. Kazanç ve süre güncellendi.`
+      );
+    } catch (err) {
+      console.error("Hizmet değiştirilemedi:", err);
+
+      // Ana randevu veya snapshot adımlarından biri hata verirse
+      // eski hizmet/fiyat/süre bilgilerini mümkün olduğunca geri yükle.
+      const rollbackAppointment: Record<string, number | null> = {
+        price_at_booking: oldPrimaryPrice,
+        total_price: oldPrice,
+        total_duration_minutes: oldDuration,
+      };
+
+      if (oldServiceId !== null) {
+        rollbackAppointment.service_id = oldServiceId;
+      }
+
+      await supabase
+        .from("appointments")
+        .update(rollbackAppointment)
+        .eq("id", serviceChangeAppointment.id);
+
+      if (oldSnapshots.length > 0) {
+        await supabase
+          .from("appointment_services")
+          .delete()
+          .eq("appointment_id", serviceChangeAppointment.id);
+
+        await supabase
+          .from("appointment_services")
+          .insert(
+            oldSnapshots.map((snapshot) => ({
+              appointment_id: serviceChangeAppointment.id,
+              service_id: snapshot.service_id,
+              service_name: snapshot.service_name,
+              price_at_booking: snapshot.price_at_booking,
+              duration_minutes: snapshot.duration_minutes,
+            }))
+          );
+      }
+
+      showNotice("error", "Hizmet değiştirilemedi. Eski hizmet korunmaya çalışıldı.");
+      await loadAppointments();
+    } finally {
+      setServiceChangeSaving(false);
+    }
   };
 
   const openManualAppointment = (date: string, time: string) => {
@@ -1689,6 +1848,82 @@ export default function AdminPage() {
         </div>
       )}
 
+      {serviceChangeAppointment && (
+        <div
+          className="fixed inset-0 z-[175] flex items-center justify-center bg-black/80 p-4 backdrop-blur-sm"
+          onClick={() =>
+            !serviceChangeSaving && setServiceChangeAppointment(null)
+          }
+        >
+          <div
+            className="w-full max-w-md rounded-2xl border border-white/10 bg-[#111] p-5 shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-[10px] tracking-[0.25em] text-[#c9a35b]">
+                  HİZMET DEĞİŞTİR
+                </p>
+                <h2 className="mt-2 text-xl font-bold">
+                  {serviceChangeAppointment.customer_name}
+                </h2>
+                <p className="mt-1 text-xs text-white/40">
+                  Şu an: {getAppointmentServicesText(serviceChangeAppointment)}
+                </p>
+              </div>
+              <button
+                type="button"
+                disabled={serviceChangeSaving}
+                onClick={() => setServiceChangeAppointment(null)}
+                className="rounded-lg border border-white/10 px-3 py-2 text-xs text-white/50 disabled:opacity-40"
+              >
+                Kapat
+              </button>
+            </div>
+
+            <label className="mt-6 block text-xs text-white/40">
+              YENİ HİZMET
+            </label>
+            <select
+              value={serviceChangeId ?? ""}
+              onChange={(event) =>
+                setServiceChangeId(
+                  event.target.value ? Number(event.target.value) : null
+                )
+              }
+              className="mt-2 w-full rounded-xl border border-white/10 bg-[#171717] px-4 py-3 text-sm text-white outline-none focus:border-[#c9a35b]/60"
+            >
+              <option value="">Hizmet seç</option>
+              {services
+                .filter((service) => service.is_active)
+                .map((service) => (
+                  <option key={service.id} value={service.id}>
+                    {service.name}
+                    {service.price !== null
+                      ? ` • ${Number(service.price).toLocaleString("tr-TR")} ₺`
+                      : ""}
+                    {` • ${service.duration_minutes} dk`}
+                  </option>
+                ))}
+            </select>
+
+            <p className="mt-3 text-xs leading-5 text-white/35">
+              Hizmet değişince randevunun fiyatı ve süresi de yeni hizmete göre
+              güncellenir. Kazanç özeti yeni fiyatı kullanır.
+            </p>
+
+            <button
+              type="button"
+              disabled={!serviceChangeId || serviceChangeSaving}
+              onClick={saveServiceChange}
+              className="mt-5 w-full rounded-xl bg-[#c9a35b] py-3.5 text-sm font-bold text-black transition hover:bg-[#dfbd76] disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {serviceChangeSaving ? "Değiştiriliyor..." : "Hizmeti Değiştir"}
+            </button>
+          </div>
+        </div>
+      )}
+
       {selectedAppointment && (
         <div
           className="fixed inset-0 z-[150] flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm"
@@ -1742,105 +1977,140 @@ export default function AdminPage() {
               <div className="mt-5 rounded-xl border border-red-500/20 bg-red-500/[0.06] px-4 py-3 text-center text-sm font-bold text-red-300">
                 İPTAL EDİLDİ
               </div>
-            ) : selectedAppointment.status === "completed" ? (
-              <div className="mt-5 rounded-xl border border-emerald-500/35 bg-emerald-500/[0.07] px-4 py-3 text-center text-sm font-bold text-emerald-300">
-                ✓ TAMAMLANDI
-              </div>
-            ) : selectedAppointment.customer_note ===
-              "Admin panelinden manuel eklendi." ? (
-              <div className="mt-5 grid grid-cols-4 gap-2">
-                <button
-                  type="button"
-                  disabled={updatingId !== null}
-                  onClick={() => openMoveAppointment(selectedAppointment)}
-                  className="rounded-xl border border-[#c9a35b]/30 bg-[#c9a35b]/[0.08] px-4 py-3 text-sm font-semibold text-[#dfbd76] disabled:opacity-40"
-                >
-                  Taşı
-                </button>
-                <button
-                  type="button"
-                  disabled={updatingId !== null}
-                  onClick={async () => {
-                    await updateStatus(selectedAppointment.id, "completed");
-                    setSelectedAppointment((current) =>
-                      current ? { ...current, status: "completed" } : current
-                    );
-                  }}
-                  className="rounded-xl border border-emerald-500/35 bg-emerald-500/[0.08] px-2 py-3 text-xs font-semibold text-emerald-300 disabled:opacity-40"
-                >
-                  {updatingId === selectedAppointment.id
-                    ? "İşleniyor..."
-                    : "Tamamlandı"}
-                </button>
-                <button
-                  type="button"
-                  disabled={updatingId !== null}
-                  onClick={() => deleteManualAppointment(selectedAppointment)}
-                  className="rounded-xl border border-red-500/25 bg-red-500/[0.07] px-4 py-3 text-sm font-semibold text-red-300 disabled:opacity-40"
-                >
-                  {updatingId === selectedAppointment.id
-                    ? "Siliniyor..."
-                    : "Sil"}
-                </button>
-              </div>
             ) : (
-              <div className="mt-5 grid grid-cols-3 gap-2">
-                <a
-                  href={`https://wa.me/${selectedAppointment.customer_phone.replace(
-                    /\D/g,
-                    ""
-                  )}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="rounded-xl border border-emerald-500/25 bg-emerald-500/[0.07] px-2 py-3 text-center text-xs font-semibold text-emerald-300"
-                >
-                  WhatsApp
-                </a>
-                <button
-                  type="button"
-                  disabled={updatingId !== null}
-                  onClick={() => openMoveAppointment(selectedAppointment)}
-                  className="rounded-xl border border-[#c9a35b]/30 bg-[#c9a35b]/[0.08] px-2 py-3 text-xs font-semibold text-[#dfbd76] disabled:opacity-40"
-                >
-                  Taşı
-                </button>
-                <button
-                  type="button"
-                  disabled={updatingId !== null}
-                  onClick={async () => {
-                    await updateStatus(selectedAppointment.id, "completed");
-                    setSelectedAppointment((current) =>
-                      current ? { ...current, status: "completed" } : current
-                    );
-                  }}
-                  className="rounded-xl border border-emerald-500/35 bg-emerald-500/[0.08] px-2 py-3 text-xs font-semibold text-emerald-300 disabled:opacity-40"
-                >
-                  {updatingId === selectedAppointment.id
-                    ? "İşleniyor..."
-                    : "Tamamlandı"}
-                </button>
-                <button
-                  type="button"
-                  disabled={updatingId !== null}
-                  onClick={async () => {
-                    const confirmed = window.confirm(
-                      `${selectedAppointment.customer_name} adlı müşterinin randevusu iptal edilsin mi?`
-                    );
-                    if (!confirmed) return;
+              <>
+                {selectedAppointment.status === "completed" && (
+                  <div className="mt-5 rounded-xl border border-emerald-500/35 bg-emerald-500/[0.07] px-4 py-3 text-center text-sm font-bold text-emerald-300">
+                    ✓ TAMAMLANDI
+                  </div>
+                )}
 
-                    await updateStatus(selectedAppointment.id, "cancelled");
-                    setSelectedAppointment((current) =>
-                      current ? { ...current, status: "cancelled" } : current
-                    );
-                  }}
-                  className="rounded-xl border border-red-500/25 bg-red-500/[0.07] px-2 py-3 text-xs font-semibold text-red-300 disabled:opacity-40"
-                >
-                  {updatingId === selectedAppointment.id
-                    ? "İptal..."
-                    : "İptal Et"}
-                </button>
-              </div>
+                {selectedAppointment.customer_note ===
+                "Admin panelinden manuel eklendi." ? (
+                  <div className="mt-5 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                    <button
+                      type="button"
+                      disabled={updatingId !== null}
+                      onClick={() => openMoveAppointment(selectedAppointment)}
+                      className="rounded-xl border border-[#c9a35b]/30 bg-[#c9a35b]/[0.08] px-2 py-3 text-xs font-semibold text-[#dfbd76] disabled:opacity-40"
+                    >
+                      Taşı
+                    </button>
+                    <button
+                      type="button"
+                      disabled={updatingId !== null}
+                      onClick={() => openServiceChange(selectedAppointment)}
+                      className="rounded-xl border border-blue-400/30 bg-blue-400/[0.07] px-2 py-3 text-xs font-semibold text-blue-300 disabled:opacity-40"
+                    >
+                      Hizmet Değiştir
+                    </button>
+                    <button
+                      type="button"
+                      disabled={updatingId !== null}
+                      onClick={async () => {
+                        const nextStatus =
+                          selectedAppointment.status === "completed"
+                            ? "approved"
+                            : "completed";
+                        await updateStatus(selectedAppointment.id, nextStatus);
+                        setSelectedAppointment((current) =>
+                          current ? { ...current, status: nextStatus } : current
+                        );
+                      }}
+                      className="rounded-xl border border-emerald-500/35 bg-emerald-500/[0.08] px-2 py-3 text-xs font-semibold text-emerald-300 disabled:opacity-40"
+                    >
+                      {updatingId === selectedAppointment.id
+                        ? "İşleniyor..."
+                        : selectedAppointment.status === "completed"
+                        ? "Geri Al"
+                        : "Tamamlandı"}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={updatingId !== null}
+                      onClick={() => deleteManualAppointment(selectedAppointment)}
+                      className="rounded-xl border border-red-500/25 bg-red-500/[0.07] px-2 py-3 text-xs font-semibold text-red-300 disabled:opacity-40"
+                    >
+                      {updatingId === selectedAppointment.id
+                        ? "Siliniyor..."
+                        : "Sil"}
+                    </button>
+                  </div>
+                ) : (
+                  <div className="mt-5 grid grid-cols-2 gap-2">
+                    <a
+                      href={`https://wa.me/${selectedAppointment.customer_phone.replace(
+                        /\D/g,
+                        ""
+                      )}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="rounded-xl border border-emerald-500/25 bg-emerald-500/[0.07] px-2 py-3 text-center text-xs font-semibold text-emerald-300"
+                    >
+                      WhatsApp
+                    </a>
+                    <button
+                      type="button"
+                      disabled={updatingId !== null}
+                      onClick={() => openMoveAppointment(selectedAppointment)}
+                      className="rounded-xl border border-[#c9a35b]/30 bg-[#c9a35b]/[0.08] px-2 py-3 text-xs font-semibold text-[#dfbd76] disabled:opacity-40"
+                    >
+                      Taşı
+                    </button>
+                    <button
+                      type="button"
+                      disabled={updatingId !== null}
+                      onClick={() => openServiceChange(selectedAppointment)}
+                      className="rounded-xl border border-blue-400/30 bg-blue-400/[0.07] px-2 py-3 text-xs font-semibold text-blue-300 disabled:opacity-40"
+                    >
+                      Hizmet Değiştir
+                    </button>
+                    <button
+                      type="button"
+                      disabled={updatingId !== null}
+                      onClick={async () => {
+                        const nextStatus =
+                          selectedAppointment.status === "completed"
+                            ? "approved"
+                            : "completed";
+                        await updateStatus(selectedAppointment.id, nextStatus);
+                        setSelectedAppointment((current) =>
+                          current ? { ...current, status: nextStatus } : current
+                        );
+                      }}
+                      className="rounded-xl border border-emerald-500/35 bg-emerald-500/[0.08] px-2 py-3 text-xs font-semibold text-emerald-300 disabled:opacity-40"
+                    >
+                      {updatingId === selectedAppointment.id
+                        ? "İşleniyor..."
+                        : selectedAppointment.status === "completed"
+                        ? "Geri Al"
+                        : "Tamamlandı"}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={updatingId !== null}
+                      onClick={async () => {
+                        const confirmed = window.confirm(
+                          `${selectedAppointment.customer_name} adlı müşterinin randevusu iptal edilsin mi?`
+                        );
+                        if (!confirmed) return;
+
+                        await updateStatus(selectedAppointment.id, "cancelled");
+                        setSelectedAppointment((current) =>
+                          current ? { ...current, status: "cancelled" } : current
+                        );
+                      }}
+                      className="col-span-2 rounded-xl border border-red-500/25 bg-red-500/[0.07] px-2 py-3 text-xs font-semibold text-red-300 disabled:opacity-40"
+                    >
+                      {updatingId === selectedAppointment.id
+                        ? "İptal..."
+                        : "İptal Et"}
+                    </button>
+                  </div>
+                )}
+              </>
             )}
+
           </div>
         </div>
       )}
@@ -3353,6 +3623,7 @@ function activityLabel(action: string) {
   if (action === "appointment_completed") return "Randevu Tamamlama";
   if (action === "appointment_rejected") return "Randevu Reddi";
   if (action === "appointment_cancelled") return "Randevu İptali";
+  if (action === "appointment_service_changed") return "Hizmet Değişikliği";
   if (action === "day_archived") return "Gün Arşivleme";
   return "Panel İşlemi";
 }
