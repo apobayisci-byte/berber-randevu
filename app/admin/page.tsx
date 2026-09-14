@@ -2430,10 +2430,10 @@ export default function AdminPage() {
                                   key={appointment.id}
                                   type="button"
                                   onClick={() => setSelectedAppointment(appointment)}
-                                  className={`pointer-events-auto absolute left-0.5 right-0.5 z-20 flex overflow-hidden rounded-md border px-1 sm:px-1.5 lg:px-2.5 text-left shadow-lg transition ${
+                                  className={`pointer-events-auto absolute left-1 right-1 z-30 flex overflow-hidden rounded-md border px-1.5 sm:px-2 lg:px-2.5 text-left shadow-lg transition ${
                                     appointment.status === "completed"
-                                      ? "border-emerald-500/65 bg-[#0d241b] hover:border-emerald-400/80 hover:bg-[#123025]"
-                                      : "border-[#c9a35b]/35 bg-[#17150f] hover:border-[#c9a35b]/60 hover:bg-[#1d1a12]"
+                                      ? "border-emerald-500/70 bg-[#0b2118] hover:border-emerald-400/85 hover:bg-[#102b20]"
+                                      : "border-[#c9a35b]/45 bg-[#17150f] hover:border-[#c9a35b]/70 hover:bg-[#1d1a12]"
                                   }`}
                                   style={{
                                     top: `${cardTop}px`,
