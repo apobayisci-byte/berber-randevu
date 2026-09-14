@@ -2142,6 +2142,13 @@ export default function AdminPage() {
                               const top = ((startMinute - firstMinute) / 15) * rowHeight;
                               const height = Math.max((duration / 15) * rowHeight, rowHeight);
 
+                              // Randevunun gerçek süresi/çakışma hesabı değişmez.
+                              // Sadece takvimde görünen kart mobilde daha kompakt tutulur.
+                              const visualHeight = Math.max(
+                                36,
+                                Math.min(Math.round(height * 0.5), 64)
+                              );
+
                               if (top < 0 || top >= calendarSlots.length * rowHeight) return null;
 
                               return (
@@ -2151,8 +2158,8 @@ export default function AdminPage() {
                                   onClick={() => setSelectedAppointment(appointment)}
                                   className="pointer-events-auto absolute left-0.5 right-0.5 z-10 flex overflow-hidden rounded-md border border-[#c9a35b]/35 bg-[#17150f] px-1 sm:px-1.5 lg:px-2.5 text-left shadow-lg transition hover:border-[#c9a35b]/60 hover:bg-[#1d1a12]"
                                   style={{
-                                    top: `${top + 4}px`,
-                                    height: `${Math.max(height - 8, 36)}px`,
+                                    top: `${top + (height - visualHeight) / 2}px`,
+                                    height: `${visualHeight}px`,
                                   }}
                                 >
                                   <div className="my-auto min-w-0 w-full overflow-hidden">
