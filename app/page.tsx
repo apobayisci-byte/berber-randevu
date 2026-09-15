@@ -1,7 +1,31 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import Script from "next/script";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/utils/supabase/client";
+
+type TurnstileApi = {
+  render: (
+    container: HTMLElement,
+    options: {
+      sitekey: string;
+      theme?: "light" | "dark" | "auto";
+      size?: "normal" | "compact" | "flexible";
+      callback?: (token: string) => void;
+      "expired-callback"?: () => void;
+      "error-callback"?: () => void;
+      "timeout-callback"?: () => void;
+    }
+  ) => string;
+  reset: (widgetId?: string) => void;
+  remove: (widgetId: string) => void;
+};
+
+declare global {
+  interface Window {
+    turnstile?: TurnstileApi;
+  }
+}
 
 type View = "home" | "appointment";
 type AppointmentStep = 1 | 2 | 3 | 4 | 5;
@@ -192,6 +216,13 @@ export default function Home() {
   const [createdAppointmentId, setCreatedAppointmentId] = useState<number | null>(null);
   const [appointmentSaving, setAppointmentSaving] = useState(false);
   const [appointmentError, setAppointmentError] = useState("");
+
+  const turnstileSiteKey = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY ?? "";
+  const turnstileContainerRef = useRef<HTMLDivElement | null>(null);
+  const turnstileWidgetIdRef = useRef<string | null>(null);
+  const [turnstileScriptReady, setTurnstileScriptReady] = useState(false);
+  const [turnstileToken, setTurnstileToken] = useState("");
+  const [turnstileError, setTurnstileError] = useState("");
 
   const [reviews, setReviews] = useState<Review[]>([]);
   const [reviewsLoading, setReviewsLoading] = useState(true);
@@ -546,6 +577,92 @@ export default function Home() {
     loadAvailableTimes();
   }, [selectedDate, selectedServiceIds]);
 
+  const resetTurnstile = () => {
+    setTurnstileToken("");
+
+    if (turnstileWidgetIdRef.current && window.turnstile) {
+      window.turnstile.reset(turnstileWidgetIdRef.current);
+    }
+  };
+
+  useEffect(() => {
+    if (appointmentStep !== 5) {
+      setTurnstileToken("");
+      setTurnstileError("");
+      return;
+    }
+
+    if (!turnstileSiteKey) {
+      setTurnstileError(
+        "Güvenlik doğrulaması yapılandırılmamış. Lütfen işletmeyle iletişime geçin."
+      );
+      return;
+    }
+
+    if (
+      !turnstileScriptReady ||
+      !window.turnstile ||
+      !turnstileContainerRef.current
+    ) {
+      return;
+    }
+
+    if (turnstileWidgetIdRef.current) {
+      try {
+        window.turnstile.remove(turnstileWidgetIdRef.current);
+      } catch {
+        // Widget daha önce kaldırılmışsa devam et.
+      }
+      turnstileWidgetIdRef.current = null;
+    }
+
+    turnstileContainerRef.current.innerHTML = "";
+    setTurnstileToken("");
+    setTurnstileError("");
+
+    turnstileWidgetIdRef.current = window.turnstile.render(
+      turnstileContainerRef.current,
+      {
+        sitekey: turnstileSiteKey,
+        theme: "dark",
+        size: "flexible",
+        callback: (token) => {
+          setTurnstileToken(token);
+          setTurnstileError("");
+        },
+        "expired-callback": () => {
+          setTurnstileToken("");
+          setTurnstileError(
+            "Güvenlik doğrulamasının süresi doldu. Lütfen tekrar doğrulayın."
+          );
+        },
+        "error-callback": () => {
+          setTurnstileToken("");
+          setTurnstileError(
+            "Güvenlik doğrulaması yüklenemedi. Lütfen tekrar deneyin."
+          );
+        },
+        "timeout-callback": () => {
+          setTurnstileToken("");
+          setTurnstileError(
+            "Güvenlik doğrulaması zaman aşımına uğradı. Lütfen tekrar deneyin."
+          );
+        },
+      }
+    );
+
+    return () => {
+      if (turnstileWidgetIdRef.current && window.turnstile) {
+        try {
+          window.turnstile.remove(turnstileWidgetIdRef.current);
+        } catch {
+          // Sayfa geçişinde widget zaten kaldırılmış olabilir.
+        }
+      }
+      turnstileWidgetIdRef.current = null;
+    };
+  }, [appointmentStep, turnstileScriptReady, turnstileSiteKey]);
+
   const selectedDateInfo = dateOptions.find(
     (date) => date.value === selectedDate
   );
@@ -593,6 +710,8 @@ export default function Home() {
     setReviewSent(false);
     setAppointmentSaving(false);
     setAppointmentError("");
+    setTurnstileToken("");
+    setTurnstileError("");
     setAvailableTimes([]);
     setAvailableTimesLoading(false);
     setAvailabilityError("");
@@ -706,6 +825,13 @@ export default function Home() {
       return;
     }
 
+    if (!turnstileToken) {
+      setAppointmentError(
+        "Lütfen güvenlik doğrulamasının tamamlanmasını bekleyin."
+      );
+      return;
+    }
+
     setAppointmentSaving(true);
     setAppointmentError("");
 
@@ -724,6 +850,7 @@ export default function Home() {
           customer_note: customerNote.trim() || null,
           appointment_date: selectedDate,
           appointment_time: selectedTime,
+          turnstile_token: turnstileToken,
         }),
       });
 
@@ -750,6 +877,7 @@ export default function Home() {
           );
         }
 
+        resetTurnstile();
         setAppointmentSaving(false);
         return;
       }
@@ -760,6 +888,7 @@ export default function Home() {
       setAppointmentError(
         "Randevu şu anda oluşturulamadı. Lütfen tekrar deneyin."
       );
+      resetTurnstile();
       setAppointmentSaving(false);
       return;
     }
@@ -966,6 +1095,12 @@ export default function Home() {
   if (view === "appointment") {
     return (
       <main className="relative min-h-screen overflow-hidden bg-[#080808] text-white">
+        <Script
+          src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit"
+          strategy="afterInteractive"
+          onLoad={() => setTurnstileScriptReady(true)}
+        />
+
         <div
           className="pointer-events-none fixed inset-0 bg-cover bg-center bg-no-repeat md:hidden"
           style={{ backgroundImage: "url('/berber-bg-mobile.png')" }}
@@ -1794,6 +1929,20 @@ export default function Home() {
                     </p>
                   </div>
 
+                  <div className="mt-5 rounded-xl border border-white/10 bg-white/[0.025] p-4">
+                    <p className="mb-3 text-xs font-semibold tracking-[0.14em] text-white/45">
+                      GÜVENLİK DOĞRULAMASI
+                    </p>
+
+                    <div ref={turnstileContainerRef} className="min-h-[65px]" />
+
+                    {turnstileError && (
+                      <p className="mt-3 text-xs leading-5 text-red-300">
+                        {turnstileError}
+                      </p>
+                    )}
+                  </div>
+
                   {appointmentError && (
                     <div className="mt-4 rounded-xl border border-red-500/20 bg-red-500/5 p-4 text-sm text-red-300">
                       {appointmentError}
@@ -1810,15 +1959,17 @@ export default function Home() {
 
                     <button
                       onClick={handleCreateAppointment}
-                      disabled={appointmentSaving}
+                      disabled={appointmentSaving || !turnstileToken}
                       className={`rounded-xl px-6 py-4 font-bold shadow-xl transition ${
-                        appointmentSaving
+                        appointmentSaving || !turnstileToken
                           ? "cursor-not-allowed bg-[#c9a35b]/50 text-black/60"
                           : "bg-[#c9a35b] text-black hover:bg-[#dfbd76]"
                       }`}
                     >
                       {appointmentSaving
                         ? "Randevu Kaydediliyor..."
+                        : !turnstileToken
+                        ? "Güvenlik Doğrulaması Bekleniyor..."
                         : "Randevuyu Oluştur ✓"}
                     </button>
                   </div>

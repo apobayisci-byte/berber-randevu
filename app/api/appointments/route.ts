@@ -14,6 +14,7 @@ type AppointmentRequest = {
   customer_note?: string | null;
   appointment_date?: string;
   appointment_time?: string;
+  turnstile_token?: string;
 };
 
 type PushSubscriptionRow = {
@@ -358,6 +359,51 @@ async function sendPushNotifications(
   );
 }
 
+type TurnstileVerifyResponse = {
+  success: boolean;
+  hostname?: string;
+  "error-codes"?: string[];
+};
+
+async function verifyTurnstileToken(token: string, clientIp: string) {
+  const secretKey = process.env.TURNSTILE_SECRET_KEY;
+
+  if (!secretKey) {
+    throw new Error("TURNSTILE_SECRET_MISSING");
+  }
+
+  const formData = new FormData();
+  formData.append("secret", secretKey);
+  formData.append("response", token);
+
+  if (clientIp) {
+    formData.append("remoteip", clientIp);
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8000);
+
+  try {
+    const response = await fetch(
+      "https://challenges.cloudflare.com/turnstile/v0/siteverify",
+      {
+        method: "POST",
+        body: formData,
+        signal: controller.signal,
+        cache: "no-store",
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error(`TURNSTILE_HTTP_${response.status}`);
+    }
+
+    return (await response.json()) as TurnstileVerifyResponse;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 function getClientIp(request: Request) {
   // Vercel/proxy tarafında istemcinin gerçek IP'si genellikle
   // x-forwarded-for başlığının ilk değerinde bulunur.
@@ -553,10 +599,69 @@ export async function POST(request: Request) {
     const appointmentDate = body.appointment_date?.trim() ?? "";
     const appointmentTime =
       body.appointment_time?.trim().slice(0, 5) ?? "";
+    const turnstileToken = body.turnstile_token?.trim() ?? "";
 
     logAppointmentDate = appointmentDate || null;
     logAppointmentTime = appointmentTime || null;
     logServiceIds = serviceIds;
+
+    if (!turnstileToken) {
+      return NextResponse.json(
+        {
+          error: "Güvenlik doğrulaması gerekli. Lütfen tekrar deneyin.",
+          code: "TURNSTILE_REQUIRED",
+        },
+        { status: 400 }
+      );
+    }
+
+    let turnstileResult: TurnstileVerifyResponse;
+
+    try {
+      turnstileResult = await verifyTurnstileToken(turnstileToken, clientIp);
+    } catch (turnstileError) {
+      console.error("Turnstile doğrulama servisi hatası:", turnstileError);
+
+      await writeErrorLog(supabaseAdmin, {
+        endpoint: "/api/appointments",
+        stage: "turnstile_siteverify",
+        httpStatus: 503,
+        errorCode: "TURNSTILE_SERVICE_ERROR",
+        customerMessage:
+          "Güvenlik doğrulaması şu anda tamamlanamıyor. Lütfen tekrar deneyin.",
+        technicalMessage:
+          turnstileError instanceof Error
+            ? turnstileError.message
+            : String(turnstileError),
+        appointmentDate: appointmentDate || null,
+        appointmentTime: appointmentTime || null,
+        serviceIds,
+      });
+
+      return NextResponse.json(
+        {
+          error:
+            "Güvenlik doğrulaması şu anda tamamlanamıyor. Lütfen tekrar deneyin.",
+          code: "TURNSTILE_SERVICE_ERROR",
+        },
+        { status: 503 }
+      );
+    }
+
+    if (!turnstileResult.success) {
+      console.warn(
+        "Turnstile doğrulaması başarısız:",
+        turnstileResult["error-codes"] ?? []
+      );
+
+      return NextResponse.json(
+        {
+          error: "Güvenlik doğrulaması başarısız oldu. Lütfen tekrar doğrulayın.",
+          code: "TURNSTILE_FAILED",
+        },
+        { status: 403 }
+      );
+    }
 
     if (
       serviceIds.length === 0 ||
