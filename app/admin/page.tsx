@@ -2055,7 +2055,7 @@ export default function AdminPage() {
 
                 {selectedAppointment.customer_note ===
                 "Admin panelinden manuel eklendi." ? (
-                  <div className="mt-5">
+                  <div className="mt-5 grid grid-cols-2 gap-2">
                     {selectedAppointment.customer_phone?.trim() && (
                       <a
                         href={`https://wa.me/${
@@ -2076,21 +2076,21 @@ export default function AdminPage() {
                         }`}
                         target="_blank"
                         rel="noreferrer"
-                        className="mb-2 block w-full rounded-xl border border-emerald-500/25 bg-emerald-500/[0.07] px-3 py-3 text-center text-xs font-semibold text-emerald-300 transition hover:border-emerald-400/40 hover:bg-emerald-500/[0.12]"
+                        className="rounded-xl border border-emerald-500/25 bg-emerald-500/[0.07] px-2 py-3 text-center text-xs font-semibold text-emerald-300"
                       >
                         WhatsApp
                       </a>
                     )}
 
-                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                      <button
-                        type="button"
-                        disabled={updatingId !== null}
-                        onClick={() => openMoveAppointment(selectedAppointment)}
-                        className="rounded-xl border border-[#c9a35b]/30 bg-[#c9a35b]/[0.08] px-2 py-3 text-xs font-semibold text-[#dfbd76] disabled:opacity-40"
-                      >
-                        Taşı
-                      </button>
+                    <button
+                      type="button"
+                      disabled={updatingId !== null}
+                      onClick={() => openMoveAppointment(selectedAppointment)}
+                      className="rounded-xl border border-[#c9a35b]/30 bg-[#c9a35b]/[0.08] px-2 py-3 text-xs font-semibold text-[#dfbd76] disabled:opacity-40"
+                    >
+                      Taşı
+                    </button>
+
                     <button
                       type="button"
                       disabled={updatingId !== null}
@@ -2099,6 +2099,7 @@ export default function AdminPage() {
                     >
                       Hizmet Değiştir
                     </button>
+
                     <button
                       type="button"
                       disabled={updatingId !== null}
@@ -2120,25 +2121,36 @@ export default function AdminPage() {
                         ? "Geri Al"
                         : "Tamamlandı"}
                     </button>
+
                     <button
                       type="button"
                       disabled={updatingId !== null}
                       onClick={() => deleteManualAppointment(selectedAppointment)}
-                      className="rounded-xl border border-red-500/25 bg-red-500/[0.07] px-2 py-3 text-xs font-semibold text-red-300 disabled:opacity-40"
+                      className="col-span-2 rounded-xl border border-red-500/25 bg-red-500/[0.07] px-2 py-3 text-xs font-semibold text-red-300 disabled:opacity-40"
                     >
                       {updatingId === selectedAppointment.id
                         ? "Siliniyor..."
                         : "Sil"}
                     </button>
-                    </div>
-                  </div>
-                ) : (
+                  </div>                ) : (
                   <div className="mt-5 grid grid-cols-2 gap-2">
                     <a
-                      href={`https://wa.me/${selectedAppointment.customer_phone.replace(
-                        /\D/g,
-                        ""
-                      )}`}
+                      href={`https://wa.me/${
+                        (() => {
+                          const phoneDigits =
+                            selectedAppointment.customer_phone.replace(/\D/g, "");
+
+                          if (phoneDigits.startsWith("0")) {
+                            return `90${phoneDigits.slice(1)}`;
+                          }
+
+                          if (phoneDigits.length === 10) {
+                            return `90${phoneDigits}`;
+                          }
+
+                          return phoneDigits;
+                        })()
+                      }`}
                       target="_blank"
                       rel="noreferrer"
                       className="rounded-xl border border-emerald-500/25 bg-emerald-500/[0.07] px-2 py-3 text-center text-xs font-semibold text-emerald-300"
