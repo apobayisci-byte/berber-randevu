@@ -227,11 +227,60 @@ export default function Home() {
   const instagramHandle = instagram.replace(/^@/, "");
   const instagramHref = `https://www.instagram.com/${instagramHandle}/`;
   const address = businessSettings?.address?.trim() || "";
-  const mapEmbedUrl = address
-    ? `https://www.google.com/maps?q=${encodeURIComponent(address)}&output=embed`
+
+  // Admin panelindeki adres/konum alanını olduğu gibi kullanır.
+  // Eğer değer DMS koordinat biçimindeyse (örn. 40°55'20.8"N 29°09'16.0"E),
+  // Google Maps iframe için otomatik olarak decimal koordinata dönüştürür.
+  // Normal bir adres girilirse hiçbir dönüşüm yapmadan o adres kullanılır.
+  // Adres silinirse harita da otomatik olarak kaldırılır; burada sabit konum yoktur.
+  const mapQuery = useMemo(() => {
+    if (!address) return "";
+
+    const coordinateMatch = address.match(
+      /([0-9]{1,3})\s*°\s*([0-9]{1,2})\s*['’′]\s*([0-9]+(?:[.,][0-9]+)?)\s*["”″]?\s*([NS])[^0-9]+([0-9]{1,3})\s*°\s*([0-9]{1,2})\s*['’′]\s*([0-9]+(?:[.,][0-9]+)?)\s*["”″]?\s*([EW])/i
+    );
+
+    if (!coordinateMatch) return address;
+
+    const toDecimal = (
+      degrees: string,
+      minutes: string,
+      seconds: string,
+      direction: string
+    ) => {
+      const deg = Number(degrees);
+      const min = Number(minutes);
+      const sec = Number(seconds.replace(",", "."));
+
+      if (![deg, min, sec].every(Number.isFinite)) return null;
+
+      const decimal = deg + min / 60 + sec / 3600;
+      return /[SW]/i.test(direction) ? -decimal : decimal;
+    };
+
+    const latitude = toDecimal(
+      coordinateMatch[1],
+      coordinateMatch[2],
+      coordinateMatch[3],
+      coordinateMatch[4]
+    );
+    const longitude = toDecimal(
+      coordinateMatch[5],
+      coordinateMatch[6],
+      coordinateMatch[7],
+      coordinateMatch[8]
+    );
+
+    if (latitude === null || longitude === null) return address;
+
+    return `${latitude.toFixed(6)},${longitude.toFixed(6)}`;
+  }, [address]);
+
+  const mapEmbedUrl = mapQuery
+    ? `https://maps.google.com/maps?q=${encodeURIComponent(mapQuery)}&z=16&output=embed`
     : "";
-  const mapOpenUrl = address
-    ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`
+  const mapOpenUrl = mapQuery
+    ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(mapQuery)}`
     : "";
 
   const workingHoursText = useMemo(() => {
@@ -286,6 +335,7 @@ export default function Home() {
     if (cachedServices) {
       setServices(cachedServices);
       setServicesLoading(false);
+      return;
     }
 
     const loadServices = async () => {
@@ -331,6 +381,7 @@ export default function Home() {
     if (cachedReviews) {
       setReviews(cachedReviews);
       setReviewsLoading(false);
+      return;
     }
 
     const loadReviews = async () => {
@@ -387,6 +438,7 @@ export default function Home() {
       setWorkingHours(cachedSchedule.workingHours);
       setBusinessSettings(cachedSchedule.businessSettings);
       setScheduleLoading(false);
+      return;
     }
 
     const loadSchedule = async () => {
@@ -477,9 +529,9 @@ export default function Home() {
         const times = result.available_times ?? [];
         setAvailableTimes(times);
 
-        if (selectedTime && !times.includes(selectedTime)) {
-          setSelectedTime("");
-        }
+        setSelectedTime((current) =>
+          current && !times.includes(current) ? "" : current
+        );
       } catch (error) {
         console.error("Uygun saatler alınamadı:", error);
         setAvailableTimes([]);
@@ -492,7 +544,7 @@ export default function Home() {
     };
 
     loadAvailableTimes();
-  }, [selectedDate, selectedServiceIds, selectedTime]);
+  }, [selectedDate, selectedServiceIds]);
 
   const selectedDateInfo = dateOptions.find(
     (date) => date.value === selectedDate

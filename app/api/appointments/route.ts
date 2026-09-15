@@ -430,15 +430,16 @@ export async function GET(request: Request) {
     const openMinutes = timeToMinutes(workingHour.open_time);
     const closeMinutes = timeToMinutes(workingHour.close_time);
     const slotAnchorMinutes = timeToMinutes(slotAnchorTime);
-    const existingAppointments = await getExistingAppointments(
-      supabaseAdmin,
-      appointmentDate,
-      appointmentInterval
-    );
-    const blockedRanges = await getBlockedTimeRanges(
-      supabaseAdmin,
-      appointmentDate
-    );
+    // Bu iki sorgu birbirinden bağımsızdır; art arda beklemek yerine
+    // paralel çalıştırarak uygun saat yanıtını hızlandırıyoruz.
+    const [existingAppointments, blockedRanges] = await Promise.all([
+      getExistingAppointments(
+        supabaseAdmin,
+        appointmentDate,
+        appointmentInterval
+      ),
+      getBlockedTimeRanges(supabaseAdmin, appointmentDate),
+    ]);
 
     const now = getIstanbulNow();
     const nowMinutes = timeToMinutes(now.time);

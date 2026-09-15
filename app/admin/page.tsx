@@ -338,7 +338,6 @@ export default function AdminPage() {
     try {
       await Promise.all([
         loadAppointments(),
-        loadBlockedIps(),
         loadActivityLogs(),
         loadErrorLogs(),
         loadSettings(),
@@ -375,6 +374,17 @@ export default function AdminPage() {
     checkSession();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (!loggedIn) return;
+
+    // IP engel listesi yardımcı veridir. Bu sorgu gecikse bile
+    // admin panelinin açılışını ve ana randevu listesini bekletmez.
+    loadBlockedIps().catch((err) => {
+      console.error("Engellenen IP listesi yüklenemedi:", err);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loggedIn]);
 
   useEffect(() => {
     if (!loggedIn) return;
