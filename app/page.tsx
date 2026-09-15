@@ -1291,89 +1291,65 @@ export default function Home() {
               ============================================= */}
 
               <section>
-                <div className={`flex flex-col justify-between sm:flex-row sm:items-end ${
-                  appointmentStep >= 4 ? "gap-2" : "gap-5"
-                }`}>
-                  <div>
-                    <p className={`${appointmentStep >= 4 ? "text-[9px]" : "text-xs"} font-semibold tracking-[0.35em] text-[#c9a35b]`}>
-                      RANDEVU SİSTEMİ
+                <div>
+                  <p className={`${appointmentStep >= 4 ? "text-[9px]" : "text-xs"} font-semibold tracking-[0.35em] text-[#c9a35b]`}>
+                    RANDEVU SİSTEMİ
+                  </p>
+
+                  <h1 className={`${appointmentStep >= 4 ? "mt-1 text-2xl md:text-3xl" : "mt-3 text-3xl md:text-4xl"} font-bold`}>
+                    Randevunu Oluştur
+                  </h1>
+
+                  {appointmentStep < 4 && (
+                    <p className="mt-3 text-sm text-white/45">
+                      Birkaç adımda sana uygun randevuyu seç.
                     </p>
-
-                    <h1 className={`${appointmentStep >= 4 ? "mt-1 text-2xl md:text-3xl" : "mt-3 text-3xl md:text-4xl"} font-bold`}>
-                      Randevunu Oluştur
-                    </h1>
-
-                    {appointmentStep < 4 && (
-                      <p className="mt-3 text-sm text-white/45">
-                        Birkaç adımda sana uygun randevuyu seç.
-                      </p>
-                    )}
-                  </div>
-
-                  <div className={`rounded-xl border border-white/10 bg-white/[0.03] ${
-                    appointmentStep >= 4 ? "px-3 py-2" : "px-4 py-3"
-                  }`}>
-                    <p className="text-[10px] tracking-[0.2em] text-white/25">
-                      RANDEVU ARALIĞI
-                    </p>
-
-                    <p className="mt-1 text-sm font-semibold text-[#c9a35b]">
-                      {scheduleLoading
-                        ? "Yükleniyor..."
-                        : `${appointmentInterval} dakika`}
-                    </p>
-                  </div>
+                  )}
                 </div>
 
-                {/* İLERLEME ÇUBUĞU */}
-                <div className={`${appointmentStep >= 4 ? "mt-2" : "mt-3"} grid grid-cols-4 gap-2`}>
+                {/* İLERLEME ÇUBUĞU - sade, daha ferah */}
+                <div className={`${appointmentStep >= 4 ? "mt-4" : "mt-5"} grid grid-cols-4 gap-3 sm:gap-4`}>
                   {[
                     { number: 1, label: "Hizmet" },
                     { number: 2, label: "Tarih" },
                     { number: 3, label: "Saat" },
                     { number: 4, label: "Bilgiler" },
                   ].map((step) => {
-                    const completed =
-                      appointmentStep > step.number;
-
+                    const completed = appointmentStep > step.number;
                     const active =
                       appointmentStep === step.number ||
-                      (appointmentStep === 5 &&
-                        step.number === 4);
+                      (appointmentStep === 5 && step.number === 4);
 
                     return (
                       <button
                         key={step.number}
                         onClick={() => {
-                          if (
-                            step.number <= appointmentStep
-                          ) {
-                            goToStep(
-                              step.number as AppointmentStep
-                            );
+                          if (step.number <= appointmentStep) {
+                            goToStep(step.number as AppointmentStep);
                           }
                         }}
                         className="text-left"
                       >
                         <div
-                          className={`h-1 rounded-full transition ${
-                            completed || active
+                          className={`h-[3px] rounded-full transition ${
+                            active
                               ? "bg-[#c9a35b]"
+                              : completed
+                              ? "bg-[#c9a35b]/65"
                               : "bg-white/10"
                           }`}
                         />
 
                         <p
-                          className={`mt-2 text-[11px] transition ${
+                          className={`mt-2.5 text-[10px] font-medium tracking-[0.02em] transition sm:text-[11px] ${
                             active
                               ? "text-[#c9a35b]"
                               : completed
-                              ? "text-white/65"
+                              ? "text-white/60"
                               : "text-white/25"
                           }`}
                         >
-                          {completed ? "✓" : step.number}.{" "}
-                          {step.label}
+                          {String(step.number).padStart(2, "0")} {step.label}
                         </p>
                       </button>
                     );
@@ -1677,7 +1653,7 @@ export default function Home() {
               ============================================= */}
 
               {appointmentStep === 4 && (
-                <section className="mt-3 md:mt-4">
+                <section className="mt-5 md:mt-6">
                   <div className="flex items-center justify-between gap-3">
                     <div>
                       <p className="text-[9px] tracking-[0.28em] text-[#c9a35b] md:text-[10px]">
@@ -1698,7 +1674,7 @@ export default function Home() {
 
                   {/* Bilgiler adımında tekrar seçim özeti göstermiyoruz.
                       Seçimlerin tamamı son onay ekranında zaten görünüyor. */}
-                  <div className="mt-3 rounded-2xl border border-white/10 bg-[#0d0d0d] p-3.5 md:p-4">
+                  <div className="mt-4 rounded-2xl border border-white/10 bg-[#0d0d0d] p-4 md:p-5">
                     <div className="grid gap-2.5 md:grid-cols-2">
                       <div>
                         <label
@@ -1762,7 +1738,7 @@ export default function Home() {
                         : "cursor-not-allowed bg-white/5 text-white/20"
                     }`}
                   >
-                    Randevu Özetine Geç →
+                    Randevu Özetine Geç
                   </button>
                 </section>
               )}
@@ -1772,7 +1748,7 @@ export default function Home() {
               ============================================= */}
 
               {appointmentStep === 5 && (
-                <section className="mt-3 md:mt-4">
+                <section className="mt-5 md:mt-6">
                   <div className="flex items-center justify-between gap-3">
                     <div>
                       <p className="text-[9px] tracking-[0.28em] text-[#c9a35b] md:text-[10px]">
@@ -1791,7 +1767,7 @@ export default function Home() {
                   </div>
 
                   {/* Son adım kompakt özet: mobilde tek bakışta temel bilgiler görünür. */}
-                  <div className="mt-3 rounded-2xl border border-white/10 bg-[#0d0d0d] p-3.5 md:p-4">
+                  <div className="mt-4 rounded-2xl border border-white/10 bg-[#0d0d0d] p-4 md:p-5">
                     <div className="flex items-center justify-between gap-3 border-b border-white/10 pb-2.5">
                       <div className="min-w-0">
                         <p className="text-[9px] tracking-[0.22em] text-[#c9a35b]">RANDEVU ÖZETİ</p>
@@ -1813,7 +1789,7 @@ export default function Home() {
                     </div>
                   </div>
 
-                  <div className="mt-3 rounded-xl border border-white/10 bg-white/[0.025] p-3">
+                  <div className="mt-4 rounded-xl border border-white/10 bg-white/[0.025] p-3.5">
                     <div className="flex items-center justify-between gap-3">
                       <p className="text-[9px] font-semibold tracking-[0.14em] text-white/45">
                         GÜVENLİK DOĞRULAMASI
@@ -1837,7 +1813,7 @@ export default function Home() {
                   <button
                     onClick={handleCreateAppointment}
                     disabled={appointmentSaving || !turnstileToken}
-                    className={`mt-3 w-full rounded-xl px-5 py-3 text-sm font-bold shadow-xl transition ${
+                    className={`mt-4 w-full rounded-xl px-5 py-3.5 text-sm font-bold shadow-xl transition ${
                       appointmentSaving || !turnstileToken
                         ? "cursor-not-allowed bg-[#c9a35b]/50 text-black/60"
                         : "bg-[#c9a35b] text-black hover:bg-[#dfbd76]"
@@ -1847,7 +1823,7 @@ export default function Home() {
                       ? "Randevu Kaydediliyor..."
                       : !turnstileToken
                       ? "Güvenlik Doğrulaması Bekleniyor..."
-                      : "Randevuyu Oluştur ✓"}
+                      : "Randevuyu Oluştur"}
                   </button>
                 </section>
               )}
