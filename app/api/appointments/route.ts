@@ -522,6 +522,27 @@ export async function POST(request: Request) {
       );
     }
 
+    const { data: blockedIp, error: blockedIpError } = await supabaseAdmin
+      .from("blocked_ips")
+      .select("id")
+      .eq("ip", clientIp)
+      .maybeSingle();
+
+    if (blockedIpError) {
+      console.error("IP engel kontrolü başarısız:", blockedIpError);
+      return NextResponse.json(
+        { error: "Randevu güvenlik kontrolü tamamlanamadı. Lütfen tekrar deneyin." },
+        { status: 500 }
+      );
+    }
+
+    if (blockedIp) {
+      return NextResponse.json(
+        { error: "Bu bağlantı üzerinden randevu oluşturulamıyor.", code: "IP_BLOCKED" },
+        { status: 403 }
+      );
+    }
+
     const body = (await request.json()) as AppointmentRequest;
     const serviceIds = normalizeServiceIds(body.service_ids);
 

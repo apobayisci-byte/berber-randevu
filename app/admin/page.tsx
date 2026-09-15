@@ -16,6 +16,7 @@ type Appointment = {
   is_archived: boolean;
   archived_at: string | null;
   total_duration_minutes: number | null;
+  booking_ip: string | null;
   services: { name: string; price: number | null } | null;
   appointment_services: {
     service_id: number;
@@ -23,6 +24,13 @@ type Appointment = {
     price_at_booking: number | null;
     duration_minutes: number;
   }[];
+};
+
+type BlockedIp = {
+  id: number;
+  ip: string;
+  reason: string | null;
+  created_at: string;
 };
 
 type Service = {
@@ -123,6 +131,8 @@ export default function AdminPage() {
   const [moveSaving, setMoveSaving] = useState(false);
 
   const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [blockedIps, setBlockedIps] = useState<BlockedIp[]>([]);
+  const [ipActionLoading, setIpActionLoading] = useState(false);
   const [activityLogs, setActivityLogs] = useState<ActivityLog[]>([]);
   const [errorLogs, setErrorLogs] = useState<ErrorLog[]>([]);
   const [services, setServices] = useState<Service[]>([]);
@@ -241,6 +251,7 @@ export default function AdminPage() {
         is_archived,
         archived_at,
         total_duration_minutes,
+        booking_ip,
         services (name, price),
         appointment_services (
           service_id,
@@ -254,6 +265,16 @@ export default function AdminPage() {
 
     if (error) throw error;
     setAppointments((data ?? []) as unknown as Appointment[]);
+  };
+
+  const loadBlockedIps = async () => {
+    const { data, error } = await supabase
+      .from("blocked_ips")
+      .select("id,ip,reason,created_at")
+      .order("created_at", { ascending: false });
+
+    if (error) throw error;
+    setBlockedIps((data ?? []) as BlockedIp[]);
   };
 
   const loadActivityLogs = async () => {
@@ -317,6 +338,7 @@ export default function AdminPage() {
     try {
       await Promise.all([
         loadAppointments(),
+        loadBlockedIps(),
         loadActivityLogs(),
         loadErrorLogs(),
         loadSettings(),
@@ -563,6 +585,7 @@ export default function AdminPage() {
     await supabase.auth.signOut();
     setLoggedIn(false);
     setAppointments([]);
+    setBlockedIps([]);
     setActivityLogs([]);
     setErrorLogs([]);
     setServices([]);
@@ -595,6 +618,48 @@ export default function AdminPage() {
       });
 
     if (logError) throw logError;
+  };
+
+  const toggleIpBlock = async (appointment: Appointment) => {
+    const ip = appointment.booking_ip?.trim();
+    if (!ip || ip === "::1") {
+      showNotice("error", "Bu randevuda engellenebilir bir IP adresi yok.");
+      return;
+    }
+
+    if (ipActionLoading) return;
+    const existing = blockedIps.find((item) => item.ip === ip);
+    const confirmed = window.confirm(
+      existing
+        ? `${ip} IP adresinin engeli kaldırılsın mı?`
+        : `${ip} IP adresi tamamen engellensin mi?`
+    );
+    if (!confirmed) return;
+
+    setIpActionLoading(true);
+    try {
+      if (existing) {
+        const { error } = await supabase
+          .from("blocked_ips")
+          .delete()
+          .eq("id", existing.id);
+        if (error) throw error;
+        showNotice("success", "IP engeli kaldırıldı.");
+      } else {
+        const { error } = await supabase.from("blocked_ips").insert({
+          ip,
+          reason: `${appointment.customer_name} adlı müşterinin randevusundan admin tarafından engellendi.`,
+        });
+        if (error) throw error;
+        showNotice("success", "IP adresi engellendi.");
+      }
+      await loadBlockedIps();
+    } catch (err) {
+      console.error("IP engelleme işlemi başarısız:", err);
+      showNotice("error", "IP engelleme işlemi yapılamadı.");
+    } finally {
+      setIpActionLoading(false);
+    }
   };
 
   const updateStatus = async (id: number, status: string) => {
@@ -1941,7 +2006,30 @@ export default function AdminPage() {
                 label="Saat"
                 value={selectedAppointment.appointment_time.slice(0, 5)}
               />
+              <Info
+                label="IP Adresi"
+                value={selectedAppointment.booking_ip || "Eski kayıt / IP yok"}
+              />
             </div>
+
+            {selectedAppointment.booking_ip && selectedAppointment.booking_ip !== "::1" && (
+              <button
+                type="button"
+                disabled={ipActionLoading}
+                onClick={() => toggleIpBlock(selectedAppointment)}
+                className={`mt-3 w-full rounded-xl border px-3 py-3 text-xs font-semibold disabled:opacity-40 ${
+                  blockedIps.some((item) => item.ip === selectedAppointment.booking_ip)
+                    ? "border-emerald-500/30 bg-emerald-500/[0.07] text-emerald-300"
+                    : "border-red-500/25 bg-red-500/[0.07] text-red-300"
+                }`}
+              >
+                {ipActionLoading
+                  ? "İşleniyor..."
+                  : blockedIps.some((item) => item.ip === selectedAppointment.booking_ip)
+                    ? "IP Engelini Kaldır"
+                    : "IP'yi Engelle"}
+              </button>
+            )}
 
             {selectedAppointment.status === "cancelled" ? (
               <div className="mt-5 rounded-xl border border-red-500/20 bg-red-500/[0.06] px-4 py-3 text-center text-sm font-bold text-red-300">
