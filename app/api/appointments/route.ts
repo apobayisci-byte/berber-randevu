@@ -358,6 +358,21 @@ async function sendPushNotifications(
   );
 }
 
+function getClientIp(request: Request) {
+  // Vercel/proxy tarafında istemcinin gerçek IP'si genellikle
+  // x-forwarded-for başlığının ilk değerinde bulunur.
+  const forwardedFor = request.headers.get("x-forwarded-for");
+  const forwardedIp = forwardedFor?.split(",")[0]?.trim();
+
+  const ip =
+    forwardedIp ||
+    request.headers.get("x-real-ip")?.trim() ||
+    request.headers.get("cf-connecting-ip")?.trim() ||
+    "";
+
+  return ip.slice(0, 100);
+}
+
 export async function GET(request: Request) {
   try {
     const supabaseAdmin = await createAdminClient();
@@ -493,6 +508,17 @@ export async function POST(request: Request) {
       return NextResponse.json(
         { error: "Sunucu yapılandırması eksik." },
         { status: 500 }
+      );
+    }
+
+    const clientIp = getClientIp(request);
+
+    // IP bilgisi alınamıyorsa günlük limit güvenli şekilde uygulanamaz.
+    // Bu durumda randevu oluşturmayı reddediyoruz.
+    if (!clientIp) {
+      return NextResponse.json(
+        { error: "Randevu güvenlik kontrolü tamamlanamadı. Lütfen tekrar deneyin." },
+        { status: 400 }
       );
     }
 
@@ -690,6 +716,7 @@ export async function POST(request: Request) {
         p_total_duration_minutes: totalDuration,
         p_fallback_duration: appointmentInterval,
         p_services: appointmentServices,
+        p_client_ip: clientIp,
       });
 
     if (atomicError) {
@@ -698,6 +725,16 @@ export async function POST(request: Request) {
       const errorText = `${atomicError.message ?? ""} ${
         atomicError.details ?? ""
       } ${atomicError.hint ?? ""}`;
+
+      if (errorText.includes("DAILY_LIMIT")) {
+        return NextResponse.json(
+          {
+            error: "Günlük randevu oluşturma limitine ulaştınız.",
+            code: "DAILY_LIMIT",
+          },
+          { status: 429 }
+        );
+      }
 
       if (
         errorText.includes("SLOT_TAKEN") ||
