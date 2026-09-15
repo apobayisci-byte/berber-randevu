@@ -2055,7 +2055,32 @@ export default function AdminPage() {
 
                 {selectedAppointment.customer_note ===
                 "Admin panelinden manuel eklendi." ? (
-                  <div className="mt-5 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                  <div className="mt-5 grid grid-cols-2 gap-2 sm:grid-cols-5">
+                    {selectedAppointment.customer_phone?.trim() && (
+                      <a
+                        href={`https://wa.me/${
+                          (() => {
+                            const phoneDigits =
+                              selectedAppointment.customer_phone.replace(/\D/g, "");
+
+                            if (phoneDigits.startsWith("0")) {
+                              return `90${phoneDigits.slice(1)}`;
+                            }
+
+                            if (phoneDigits.length === 10) {
+                              return `90${phoneDigits}`;
+                            }
+
+                            return phoneDigits;
+                          })()
+                        }`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="rounded-xl border border-emerald-500/25 bg-emerald-500/[0.07] px-2 py-3 text-center text-xs font-semibold text-emerald-300"
+                      >
+                        WhatsApp
+                      </a>
+                    )}
                     <button
                       type="button"
                       disabled={updatingId !== null}
