@@ -96,7 +96,7 @@ export const metadata: Metadata = {
     title: "Murathan Yazar | Berber",
 
     description:
-      "Online randevunuzu kolayca oluşturun. Hizmetleri, fiyatları ve çalışma saatlerini görüntüleyin.",
+      "Tarzına uygun kesim, sana uygun saat. Murathan Yazar berber salonu için hemen online randevu al, fiyatları ve çalışma saatlerini incele.",
 
     images: ["https://www.murathanyazar.com.tr/og-image.png"],
   },
