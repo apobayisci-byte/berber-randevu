@@ -1291,22 +1291,28 @@ export default function Home() {
               ============================================= */}
 
               <section>
-                <div className="flex flex-col justify-between gap-5 sm:flex-row sm:items-end">
+                <div className={`flex flex-col justify-between sm:flex-row sm:items-end ${
+                  appointmentStep >= 4 ? "gap-2" : "gap-5"
+                }`}>
                   <div>
-                    <p className="text-xs font-semibold tracking-[0.35em] text-[#c9a35b]">
+                    <p className={`${appointmentStep >= 4 ? "text-[9px]" : "text-xs"} font-semibold tracking-[0.35em] text-[#c9a35b]`}>
                       RANDEVU SİSTEMİ
                     </p>
 
-                    <h1 className="mt-3 text-3xl font-bold md:text-4xl">
+                    <h1 className={`${appointmentStep >= 4 ? "mt-1 text-2xl md:text-3xl" : "mt-3 text-3xl md:text-4xl"} font-bold`}>
                       Randevunu Oluştur
                     </h1>
 
-                    <p className="mt-3 text-sm text-white/45">
-                      Birkaç adımda sana uygun randevuyu seç.
-                    </p>
+                    {appointmentStep < 4 && (
+                      <p className="mt-3 text-sm text-white/45">
+                        Birkaç adımda sana uygun randevuyu seç.
+                      </p>
+                    )}
                   </div>
 
-                  <div className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3">
+                  <div className={`rounded-xl border border-white/10 bg-white/[0.03] ${
+                    appointmentStep >= 4 ? "px-3 py-2" : "px-4 py-3"
+                  }`}>
                     <p className="text-[10px] tracking-[0.2em] text-white/25">
                       RANDEVU ARALIĞI
                     </p>
@@ -1320,7 +1326,7 @@ export default function Home() {
                 </div>
 
                 {/* İLERLEME ÇUBUĞU */}
-                <div className="mt-3 grid grid-cols-4 gap-2">
+                <div className={`${appointmentStep >= 4 ? "mt-2" : "mt-3"} grid grid-cols-4 gap-2`}>
                   {[
                     { number: 1, label: "Hizmet" },
                     { number: 2, label: "Tarih" },
@@ -1671,150 +1677,87 @@ export default function Home() {
               ============================================= */}
 
               {appointmentStep === 4 && (
-                <section className="mt-12">
-                  <div className="flex items-end justify-between gap-5">
+                <section className="mt-3 md:mt-4">
+                  <div className="flex items-center justify-between gap-3">
                     <div>
-                      <p className="text-xs tracking-[0.3em] text-[#c9a35b]">
+                      <p className="text-[9px] tracking-[0.28em] text-[#c9a35b] md:text-[10px]">
                         04 / BİLGİLER
                       </p>
-
-                      <h2 className="mt-2 text-2xl font-semibold">
+                      <h2 className="mt-0.5 text-lg font-semibold md:text-xl">
                         Son olarak seni tanıyalım.
                       </h2>
-
-                      <p className="mt-2 text-sm text-white/35">
-                        Randevu için iletişim bilgilerini gir.
-                      </p>
                     </div>
 
                     <button
                       onClick={() => goToStep(3)}
-                      className="shrink-0 text-sm text-white/40 transition hover:text-white"
+                      className="shrink-0 text-[11px] text-white/40 transition hover:text-white md:text-xs"
                     >
                       ← Saati değiştir
                     </button>
                   </div>
 
-                  <div className="mt-7 grid gap-6 lg:grid-cols-[1fr_0.8fr]">
-                    {/* FORM */}
-                    <div className="rounded-2xl border border-white/10 bg-[#0d0d0d] p-6 md:p-8">
+                  {/* Bilgiler adımında tekrar seçim özeti göstermiyoruz.
+                      Seçimlerin tamamı son onay ekranında zaten görünüyor. */}
+                  <div className="mt-3 rounded-2xl border border-white/10 bg-[#0d0d0d] p-3.5 md:p-4">
+                    <div className="grid gap-2.5 md:grid-cols-2">
                       <div>
                         <label
                           htmlFor="customerName"
-                          className="text-xs font-semibold tracking-[0.15em] text-white/45"
+                          className="text-[9px] font-semibold tracking-[0.15em] text-white/45 md:text-[10px]"
                         >
                           AD SOYAD *
                         </label>
-
                         <input
                           id="customerName"
                           type="text"
                           value={customerName}
-                          onChange={(event) =>
-                            setCustomerName(
-                              event.target.value
-                            )
-                          }
+                          onChange={(event) => setCustomerName(event.target.value)}
                           placeholder="Adınızı ve soyadınızı girin"
-                          className="mt-3 w-full rounded-xl border border-white/10 bg-[#141414] px-4 py-4 text-white outline-none transition placeholder:text-white/20 focus:border-[#c9a35b]/60"
+                          className="mt-1 w-full rounded-lg border border-white/10 bg-[#141414] px-3.5 py-2.5 text-sm text-white outline-none transition placeholder:text-white/20 focus:border-[#c9a35b]/60"
                         />
                       </div>
 
-                      <div className="mt-6">
+                      <div>
                         <label
                           htmlFor="customerPhone"
-                          className="text-xs font-semibold tracking-[0.15em] text-white/45"
+                          className="text-[9px] font-semibold tracking-[0.15em] text-white/45 md:text-[10px]"
                         >
                           TELEFON *
                         </label>
-
                         <input
                           id="customerPhone"
                           type="tel"
                           value={customerPhone}
-                          onChange={(event) =>
-                            setCustomerPhone(
-                              event.target.value
-                            )
-                          }
+                          onChange={(event) => setCustomerPhone(event.target.value)}
                           placeholder="05XX XXX XX XX"
-                          className="mt-3 w-full rounded-xl border border-white/10 bg-[#141414] px-4 py-4 text-white outline-none transition placeholder:text-white/20 focus:border-[#c9a35b]/60"
-                        />
-                      </div>
-
-                      <div className="mt-6">
-                        <label
-                          htmlFor="customerNote"
-                          className="text-xs font-semibold tracking-[0.15em] text-white/45"
-                        >
-                          NOT
-                          <span className="ml-2 font-normal text-white/20">
-                            (İsteğe bağlı)
-                          </span>
-                        </label>
-
-                        <textarea
-                          id="customerNote"
-                          value={customerNote}
-                          onChange={(event) =>
-                            setCustomerNote(
-                              event.target.value
-                            )
-                          }
-                          placeholder="Eklemek istediğiniz bir not varsa yazabilirsiniz."
-                          rows={4}
-                          className="mt-3 w-full resize-none rounded-xl border border-white/10 bg-[#141414] px-4 py-4 text-white outline-none transition placeholder:text-white/20 focus:border-[#c9a35b]/60"
+                          className="mt-1 w-full rounded-lg border border-white/10 bg-[#141414] px-3.5 py-2.5 text-sm text-white outline-none transition placeholder:text-white/20 focus:border-[#c9a35b]/60"
                         />
                       </div>
                     </div>
 
-                    {/* KÜÇÜK ÖZET */}
-                    <div className="rounded-2xl border border-[#c9a35b]/20 bg-[#c9a35b]/[0.05] p-6">
-                      <p className="text-xs tracking-[0.25em] text-[#c9a35b]">
-                        SEÇİMİN
-                      </p>
-
-                      <div className="mt-6 space-y-5">
-                        <SummaryRow
-                          label="Hizmet"
-                          value={selectedServicesText}
-                        />
-
-                        <SummaryRow
-                          label="Tarih"
-                          value={
-                            selectedDateInfo?.fullLabel ||
-                            selectedDate
-                          }
-                        />
-
-                        <SummaryRow
-                          label="Saat"
-                          value={selectedTime}
-                        />
-
-                        <SummaryRow
-                          label="Süre"
-                          value={`${totalDuration} dk`}
-                        />
-
-                        <SummaryRow
-                          label="Toplam"
-                          value={formatServicePrice(totalPrice)}
-                        />
-                      </div>
+                    <div className="mt-2.5">
+                      <label
+                        htmlFor="customerNote"
+                        className="text-[9px] font-semibold tracking-[0.15em] text-white/45 md:text-[10px]"
+                      >
+                        NOT <span className="font-normal text-white/20">(İsteğe bağlı)</span>
+                      </label>
+                      <textarea
+                        id="customerNote"
+                        value={customerNote}
+                        onChange={(event) => setCustomerNote(event.target.value)}
+                        placeholder="Eklemek istediğiniz bir not varsa yazabilirsiniz."
+                        rows={1}
+                        className="mt-1 min-h-[42px] w-full resize-none rounded-lg border border-white/10 bg-[#141414] px-3.5 py-2.5 text-sm text-white outline-none transition placeholder:text-white/20 focus:border-[#c9a35b]/60"
+                      />
                     </div>
                   </div>
 
                   <button
                     onClick={handleCustomerContinue}
-                    disabled={
-                      !customerName.trim() ||
-                      !customerPhone.trim()
-                    }
-                    className={`mt-8 w-full rounded-xl py-4 font-bold transition ${
-                      customerName.trim() &&
-                      customerPhone.trim()
+                    disabled={!customerName.trim() || !customerPhone.trim()}
+                    className={`mt-3 w-full rounded-xl py-3 text-sm font-bold transition ${
+                      customerName.trim() && customerPhone.trim()
                         ? "bg-[#c9a35b] text-black hover:bg-[#dfbd76]"
                         : "cursor-not-allowed bg-white/5 text-white/20"
                     }`}
@@ -1829,150 +1772,83 @@ export default function Home() {
               ============================================= */}
 
               {appointmentStep === 5 && (
-                <section className="mt-12">
-                  <div>
-                    <p className="text-xs tracking-[0.3em] text-[#c9a35b]">
-                      SON ADIM
-                    </p>
-
-                    <h2 className="mt-2 text-2xl font-semibold">
-                      Randevunu kontrol et.
-                    </h2>
-
-                    <p className="mt-2 text-sm text-white/35">
-                      Bilgiler doğruysa randevuyu oluştur.
-                    </p>
-                  </div>
-
-                  <div className="mt-7 overflow-hidden rounded-3xl border border-white/10 bg-[#0d0d0d]">
-                    <div className="border-b border-white/10 bg-[#c9a35b]/[0.06] p-6 md:p-8">
-                      <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
-                        <div>
-                          <p className="text-xs tracking-[0.25em] text-[#c9a35b]">
-                            RANDEVU ÖZETİ
-                          </p>
-
-                          <h3 className="mt-2 text-2xl font-bold">
-                            {selectedServicesText}
-                          </h3>
-                        </div>
-
-                        <div className="rounded-xl border border-[#c9a35b]/30 bg-[#c9a35b]/10 px-5 py-3 text-center">
-                          <p className="text-xs text-white/35">
-                            SAAT
-                          </p>
-
-                          <p className="mt-1 text-xl font-bold text-[#c9a35b]">
-                            {selectedTime}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="grid gap-0 md:grid-cols-2">
-                      <div className="space-y-5 p-6 md:border-r md:border-white/10 md:p-8">
-                        <SummaryRow
-                          label="Ad Soyad"
-                          value={customerName}
-                        />
-
-                        <SummaryRow
-                          label="Telefon"
-                          value={customerPhone}
-                        />
-
-                        {customerNote.trim() && (
-                          <SummaryRow
-                            label="Not"
-                            value={customerNote}
-                          />
-                        )}
-                      </div>
-
-                      <div className="space-y-5 border-t border-white/10 p-6 md:border-t-0 md:p-8">
-                        <SummaryRow
-                          label="Hizmet"
-                          value={selectedServicesText}
-                        />
-
-                        <SummaryRow
-                          label="Tarih"
-                          value={
-                            selectedDateInfo?.fullLabel ||
-                            selectedDate
-                          }
-                        />
-
-                        <SummaryRow
-                          label="Saat"
-                          value={selectedTime}
-                        />
-
-                        <SummaryRow
-                          label="Randevu Süresi"
-                          value={`${totalDuration} dk`}
-                        />
-
-                        <SummaryRow
-                          label="Toplam"
-                          value={formatServicePrice(totalPrice)}
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="mt-6 rounded-xl border border-white/10 bg-white/[0.025] p-4">
-                    <p className="text-xs leading-6 text-white/35">
-                      Randevu, uygun saat boşsa otomatik olarak onaylanır.
-                      Seçtiğin hizmetlerin toplam süresi boyunca çakışan başka
-                      randevu oluşturulamaz.
-                    </p>
-                  </div>
-
-                  <div className="mt-5 rounded-xl border border-white/10 bg-white/[0.025] p-4">
-                    <p className="mb-3 text-xs font-semibold tracking-[0.14em] text-white/45">
-                      GÜVENLİK DOĞRULAMASI
-                    </p>
-
-                    <div ref={turnstileContainerRef} className="min-h-[65px]" />
-
-                    {turnstileError && (
-                      <p className="mt-3 text-xs leading-5 text-red-300">
-                        {turnstileError}
+                <section className="mt-3 md:mt-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-[9px] tracking-[0.28em] text-[#c9a35b] md:text-[10px]">
+                        SON ADIM
                       </p>
+                      <h2 className="mt-0.5 text-lg font-semibold md:text-xl">
+                        Randevunu kontrol et.
+                      </h2>
+                    </div>
+                    <button
+                      onClick={() => goToStep(4)}
+                      className="shrink-0 text-[11px] text-white/40 transition hover:text-white md:text-xs"
+                    >
+                      ← Düzenle
+                    </button>
+                  </div>
+
+                  {/* Son adım kompakt özet: mobilde tek bakışta temel bilgiler görünür. */}
+                  <div className="mt-3 rounded-2xl border border-white/10 bg-[#0d0d0d] p-3.5 md:p-4">
+                    <div className="flex items-center justify-between gap-3 border-b border-white/10 pb-2.5">
+                      <div className="min-w-0">
+                        <p className="text-[9px] tracking-[0.22em] text-[#c9a35b]">RANDEVU ÖZETİ</p>
+                        <p className="mt-1 truncate text-base font-bold md:text-lg">{selectedServicesText}</p>
+                      </div>
+                      <div className="shrink-0 rounded-lg border border-[#c9a35b]/30 bg-[#c9a35b]/10 px-3 py-1.5 text-center">
+                        <p className="text-[8px] text-white/35">SAAT</p>
+                        <p className="text-base font-bold text-[#c9a35b]">{selectedTime}</p>
+                      </div>
+                    </div>
+
+                    <div className="mt-2.5 grid grid-cols-2 gap-x-4 gap-y-2 text-sm md:grid-cols-3">
+                      <SummaryRow label="Ad Soyad" value={customerName} />
+                      <SummaryRow label="Telefon" value={customerPhone} />
+                      <SummaryRow label="Tarih" value={selectedDateInfo?.fullLabel || selectedDate} />
+                      <SummaryRow label="Süre" value={`${totalDuration} dk`} />
+                      <SummaryRow label="Toplam" value={formatServicePrice(totalPrice)} />
+                      {customerNote.trim() && <SummaryRow label="Not" value={customerNote} />}
+                    </div>
+                  </div>
+
+                  <div className="mt-3 rounded-xl border border-white/10 bg-white/[0.025] p-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-[9px] font-semibold tracking-[0.14em] text-white/45">
+                        GÜVENLİK DOĞRULAMASI
+                      </p>
+                      {turnstileToken && (
+                        <span className="text-[10px] font-semibold text-green-300">✓ Doğrulandı</span>
+                      )}
+                    </div>
+                    <div ref={turnstileContainerRef} className="mt-2 min-h-[65px] overflow-hidden" />
+                    {turnstileError && (
+                      <p className="mt-2 text-[11px] leading-4 text-red-300">{turnstileError}</p>
                     )}
                   </div>
 
                   {appointmentError && (
-                    <div className="mt-4 rounded-xl border border-red-500/20 bg-red-500/5 p-4 text-sm text-red-300">
+                    <div className="mt-2 rounded-xl border border-red-500/20 bg-red-500/5 p-3 text-xs text-red-300">
                       {appointmentError}
                     </div>
                   )}
 
-                  <div className="mt-7 grid gap-3 sm:grid-cols-[0.4fr_1fr]">
-                    <button
-                      onClick={() => goToStep(4)}
-                      className="rounded-xl border border-white/15 px-6 py-4 font-semibold text-white/60 transition hover:border-white/30 hover:text-white"
-                    >
-                      ← Düzenle
-                    </button>
-
-                    <button
-                      onClick={handleCreateAppointment}
-                      disabled={appointmentSaving || !turnstileToken}
-                      className={`rounded-xl px-6 py-4 font-bold shadow-xl transition ${
-                        appointmentSaving || !turnstileToken
-                          ? "cursor-not-allowed bg-[#c9a35b]/50 text-black/60"
-                          : "bg-[#c9a35b] text-black hover:bg-[#dfbd76]"
-                      }`}
-                    >
-                      {appointmentSaving
-                        ? "Randevu Kaydediliyor..."
-                        : !turnstileToken
-                        ? "Güvenlik Doğrulaması Bekleniyor..."
-                        : "Randevuyu Oluştur ✓"}
-                    </button>
-                  </div>
+                  <button
+                    onClick={handleCreateAppointment}
+                    disabled={appointmentSaving || !turnstileToken}
+                    className={`mt-3 w-full rounded-xl px-5 py-3 text-sm font-bold shadow-xl transition ${
+                      appointmentSaving || !turnstileToken
+                        ? "cursor-not-allowed bg-[#c9a35b]/50 text-black/60"
+                        : "bg-[#c9a35b] text-black hover:bg-[#dfbd76]"
+                    }`}
+                  >
+                    {appointmentSaving
+                      ? "Randevu Kaydediliyor..."
+                      : !turnstileToken
+                      ? "Güvenlik Doğrulaması Bekleniyor..."
+                      : "Randevuyu Oluştur ✓"}
+                  </button>
                 </section>
               )}
 
